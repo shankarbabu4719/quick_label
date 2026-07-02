@@ -280,15 +280,6 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
           />
         </div>
       )}
-      {isMobile && renderingError != null && (
-        <div {...stylex.props(styles.loadingScreenWrapper)}>
-          <LoadingStateScreen
-            title="Well, this is embarrassing..."
-            description="This demo is not optimized for your device. Please try again on a different device with a larger screen."
-            linkProps={{to: '..', label: 'Back to homepage'}}
-          />
-        </div>
-      )}
       {uploadingState !== 'default' && (
         <div {...stylex.props(styles.loadingScreenWrapper)}>
           <UploadLoadingScreen />

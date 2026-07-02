@@ -16,9 +16,30 @@
 import {Package} from '@carbon/icons-react';
 import OptionButton from './OptionButton';
 import useDownloadVideo from './useDownloadVideo';
+import {useAtomValue} from 'jotai';
+import {sessionAtom} from '@/demo/atoms';
 
 export default function DownloadOption() {
   const {download, state} = useDownloadVideo();
+  const session = useAtomValue(sessionAtom);
+
+  async function handleDownload() {
+    // 1. Encode video and save to browser Downloads
+    const file = await download(true);
+
+    // 2. Automatically save masked video to backend exports folder
+    if (session?.id && file) {
+      try {
+        await fetch(`http://localhost:7263/save_masked_video/${session.id}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'video/mp4'},
+          body: file,
+        });
+      } catch (e) {
+        console.warn('Could not save masked video to server:', e);
+      }
+    }
+  }
 
   return (
     <OptionButton
@@ -28,7 +49,7 @@ export default function DownloadOption() {
         loading: state === 'started' || state === 'encoding',
         label: 'Downloading...',
       }}
-      onClick={download}
+      onClick={handleDownload}
     />
   );
 }

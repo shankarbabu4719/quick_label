@@ -443,8 +443,8 @@ export default class VideoWorkerBridge extends EventEmitter<VideoWorkerEventMap>
   }
 
   streamMasks(): void {
-    this.sendRequest<StreamMasksRequest>('streamMasks', {
-      frameIndex: this.frame,
+    this.sendRequest<StreamMasksRequest>("streamMasks", {
+      frameIndex: 0,
     });
   }
 

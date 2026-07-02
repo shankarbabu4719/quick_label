@@ -1,4 +1,27 @@
-.vscode/
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Environment
+venv/
+.venv/
+
+# Videos
+*.mp4
+*.avi
+*.mov
+
+# Output folders
+demo/data/exports/
+notebooks/my_video/
+notebooks/test_video/
+
+# Checkpoints
+checkpoints/*.pt
+demo/backend/checkpoints/*.pt
+
+# macOS
+.DS_Store.vscode/
 .DS_Store
 __pycache__/
 *-checkpoint.ipynb

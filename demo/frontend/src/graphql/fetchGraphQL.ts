@@ -47,6 +47,13 @@ export default async function fetchGraphQL(
 
   requestInit.headers = Object.assign(customHeaders, requestInit.headers);
 
+  // Always set Accept: application/json so Strawberry doesn't treat the
+  // request as a streaming (SSE/multipart) subscription and reject it.
+  requestInit.headers = Object.assign(
+    {'Accept': 'application/json'},
+    requestInit.headers,
+  );
+
   if (uploadables != null) {
     const formData = new FormData();
     formData.append(
