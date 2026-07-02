@@ -26,10 +26,10 @@ export default function useScreenSize(): {
     const updateSize = (): void => {
       setScreenSize(window.innerWidth);
     };
-    window.addEventListener('resize', updateSize);
+    window.addEventListener("resize", updateSize);
     updateSize();
-    return (): void => window.removeEventListener('resize', updateSize);
+    return (): void => window.removeEventListener("resize", updateSize);
   }, []);
 
-  return {isMobile: screenSize < screenSizes['md'], screenSize};
+  return { isMobile: false, screenSize };
 }

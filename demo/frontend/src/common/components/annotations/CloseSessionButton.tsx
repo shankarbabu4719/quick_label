@@ -25,7 +25,9 @@ export default function CloseSessionButton({onSessionClose}: Props) {
   const video = useVideo();
 
   function handleCloseSession() {
-    video?.closeSession();
+    // Don't close the backend session here — we still need it alive for
+    // JSON export on the MoreOptions screen. Session will be closed when
+    // the user starts a new session or restarts.
     video?.logAnnotations();
     onSessionClose();
   }

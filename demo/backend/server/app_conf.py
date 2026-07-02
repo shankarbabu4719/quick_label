@@ -48,8 +48,15 @@ POSTERS_PREFIX = "posters"
 # Path where all posters are stored
 POSTERS_PATH = DATA_PATH / POSTERS_PREFIX
 
+# Prefix for tracking exports (JSON files)
+EXPORTS_PREFIX = "exports"
+
+# Path where tracking exports are stored
+EXPORTS_PATH = DATA_PATH / EXPORTS_PREFIX
+
 # Make sure any of those paths exist
 os.makedirs(DATA_PATH, exist_ok=True)
 os.makedirs(GALLERY_PATH, exist_ok=True)
 os.makedirs(UPLOADS_PATH, exist_ok=True)
 os.makedirs(POSTERS_PATH, exist_ok=True)
+os.makedirs(EXPORTS_PATH, exist_ok=True)

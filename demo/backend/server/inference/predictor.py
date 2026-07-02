@@ -85,17 +85,20 @@ class InferenceAPI:
                 "See e.g. https://github.com/pytorch/pytorch/issues/84936 for a discussion."
             )
 
+        # Force float32 globally to avoid any dtype mismatches
+        torch.set_default_dtype(torch.float32)
+        
         self.device = device
         self.predictor = build_sam2_video_predictor(
             model_cfg, checkpoint, device=device
         )
+        # Make 100% sure the entire model is in float32
+        self.predictor = self.predictor.float()
         self.inference_lock = Lock()
 
     def autocast_context(self):
-        if self.device.type == "cuda":
-            return torch.autocast("cuda", dtype=torch.bfloat16)
-        else:
-            return contextlib.nullcontext()
+        # NEVER use autocast (bfloat16) to avoid dtype mismatches on any device
+        return contextlib.nullcontext()
 
     def start_session(self, request: StartSessionRequest) -> StartSessionResponse:
         with self.autocast_context(), self.inference_lock:
@@ -110,6 +113,8 @@ class InferenceAPI:
             self.session_states[session_id] = {
                 "canceled": False,
                 "state": inference_state,
+                "masks_per_frame": {},  # key: frame_idx, value: list of (obj_id, rle_mask)
+                "video_path": request.path,
             }
             return StartSessionResponse(session_id=session_id)
 
@@ -146,6 +151,12 @@ class InferenceAPI:
             rle_mask_list = self.__get_rle_mask_list(
                 object_ids=object_ids, masks=masks_binary
             )
+            
+            # Store masks for this frame in session
+            session["masks_per_frame"][frame_idx] = [
+                {"object_id": r.object_id, "mask": {"counts": r.mask.counts, "size": r.mask.size}}
+                for r in rle_mask_list
+            ]
 
             return PropagateDataResponse(
                 frame_index=frame_idx,
@@ -317,6 +328,12 @@ class InferenceAPI:
                         rle_mask_list = self.__get_rle_mask_list(
                             object_ids=obj_ids, masks=masks_binary
                         )
+                        
+                        # Store masks for this frame in session
+                        session["masks_per_frame"][frame_idx] = [
+                            {"object_id": r.object_id, "mask": {"counts": r.mask.counts, "size": r.mask.size}}
+                            for r in rle_mask_list
+                        ]
 
                         yield PropagateDataResponse(
                             frame_index=frame_idx,
@@ -342,6 +359,12 @@ class InferenceAPI:
                         rle_mask_list = self.__get_rle_mask_list(
                             object_ids=obj_ids, masks=masks_binary
                         )
+                        
+                        # Store masks for this frame in session
+                        session["masks_per_frame"][frame_idx] = [
+                            {"object_id": r.object_id, "mask": {"counts": r.mask.counts, "size": r.mask.size}}
+                            for r in rle_mask_list
+                        ]
 
                         yield PropagateDataResponse(
                             frame_index=frame_idx,
@@ -425,3 +448,41 @@ class InferenceAPI:
         else:
             logger.info(f"removed session {session_id}; {self.__get_session_stats()}")
             return True
+
+    def export_session(self, session_id: str) -> dict:
+        with self.autocast_context(), self.inference_lock:
+            session = self.__get_session(session_id)
+            inference_state = session["state"]
+            
+            # Get object IDs from the inference state
+            obj_ids = []
+            if hasattr(inference_state, "obj_ids"):
+                obj_ids = inference_state.obj_ids
+            elif isinstance(inference_state, dict) and "obj_ids" in inference_state:
+                obj_ids = inference_state["obj_ids"]
+            
+            # Get num_frames
+            num_frames = 0
+            if hasattr(inference_state, "num_frames"):
+                num_frames = inference_state.num_frames
+            elif isinstance(inference_state, dict) and "num_frames" in inference_state:
+                num_frames = inference_state["num_frames"]
+            
+            # Build export data
+            export_data = {
+                "session_id": session_id,
+                "video_path": session.get("video_path", ""),
+                "num_frames": num_frames,
+                "objects": [{"object_id": obj_id, "label": f"Object {obj_id}"} for obj_id in obj_ids],
+                "frames": []
+            }
+            
+            # Add frame data
+            if "masks_per_frame" in session:
+                for frame_idx, masks in sorted(session["masks_per_frame"].items()):
+                    export_data["frames"].append({
+                        "frame_index": frame_idx,
+                        "masks": masks
+                    })
+            
+            return export_data
