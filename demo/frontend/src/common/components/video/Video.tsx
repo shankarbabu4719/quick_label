@@ -104,6 +104,7 @@ export type VideoRef = {
   encode(): void;
   streamMasks(startFrameIndex?: number, endFrameIndex?: number): void;
   abortStreamMasks(): Promise<void>;
+  setCropRange(startFrame: number, endFrame: number): void;
   addEventListener<K extends keyof VideoWorkerEventMap>(
     type: K,
     listener: (ev: VideoWorkerEventMap[K]) => unknown,
@@ -209,6 +210,9 @@ export default forwardRef<VideoRef, Props>(function Video(
       },
       abortStreamMasks(): Promise<void> {
         return bridge.abortStreamMasks();
+      },
+      setCropRange(startFrame: number, endFrame: number): void {
+        bridge.setCropRange(startFrame, endFrame);
       },
       addEventListener<K extends keyof VideoWorkerEventMap>(
         type: K,
