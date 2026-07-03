@@ -107,38 +107,78 @@ def export_session(session_id: str) -> Response:
         start_frame = request.args.get("start_frame", type=int, default=None)
         end_frame = request.args.get("end_frame", type=int, default=None)
 
-        export_data = inference_api.export_session(
-            session_id, start_frame=start_frame, end_frame=end_frame
-        )
-        export_folder = _get_session_export_folder(session_id)
+        try:
+            export_data = inference_api.export_session(
+                session_id, start_frame=start_frame, end_frame=end_frame
+            )
+            export_folder = _get_session_export_folder(session_id)
 
-        # 1. Save tracking JSON
-        json_path = export_folder / "tracking.json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(export_data, f, ensure_ascii=False, indent=2)
-        logger.info(f"Saved tracking JSON to {json_path}")
+            # 1. Save tracking JSON
+            json_path = export_folder / "tracking.json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"Saved tracking JSON to {json_path}")
 
-        # 2. Copy original video into the export folder
-        video_path = export_data.get("video_path", "")
-        if video_path and os.path.isfile(video_path):
-            dest = export_folder / "original.mp4"
-            if not dest.exists():
-                shutil.copy2(video_path, dest)
-                logger.info(f"Copied original video to {dest}")
+            # 2. Copy original video into the export folder
+            video_path = export_data.get("video_path", "")
+            if video_path and os.path.isfile(video_path):
+                dest = export_folder / "original.mp4"
+                if not dest.exists():
+                    shutil.copy2(video_path, dest)
 
-        # 3. Delete any draft for this session (project is now complete)
-        _delete_draft_for_session(session_id)
+            # 3. Delete any draft for this session (project is now complete)
+            _delete_draft_for_session(session_id)
+
+        except RuntimeError:
+            # Session expired — try to serve from disk
+            export_data = _load_export_from_disk(session_id, start_frame, end_frame)
+            if export_data is None:
+                return make_response("Session expired and no export found on disk", 404)
 
         # Return JSON as download to browser
         response = make_response(json.dumps(export_data, ensure_ascii=False, indent=2))
         response.headers["Content-Type"] = "application/json"
         response.headers["Content-Disposition"] = "attachment; filename=tracking.json"
-        # Tell frontend which folder this session exports to
-        response.headers["X-Export-Folder"] = export_folder.name
         return response
+
     except Exception as e:
         logger.error(f"Error exporting session {session_id}: {e}")
         return make_response(f"Error exporting session: {e}", 500)
+
+
+def _load_export_from_disk(session_id: str, start_frame=None, end_frame=None):
+    """
+    Fallback: load tracking.json from the most recent exports folder.
+    Used when the session has expired from RAM but export was already saved.
+    """
+    import json
+    try:
+        # Find the most recently modified export folder
+        if not EXPORTS_PATH.exists():
+            return None
+        folders = [f for f in EXPORTS_PATH.iterdir() if f.is_dir()]
+        if not folders:
+            return None
+        # Sort by mtime, newest first
+        folders.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+        for folder in folders:
+            json_path = folder / "tracking.json"
+            if json_path.exists():
+                with open(json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # Apply crop filter if requested
+                if start_frame is not None or end_frame is not None:
+                    data["frames"] = [
+                        fr for fr in data.get("frames", [])
+                        if (start_frame is None or fr["frame_index"] >= start_frame)
+                        and (end_frame is None or fr["frame_index"] <= end_frame)
+                    ]
+                logger.info(f"Served tracking.json from disk: {json_path}")
+                return data
+        return None
+    except Exception as e:
+        logger.error(f"Failed to load export from disk: {e}")
+        return None
 
 
 def _delete_draft_for_session(session_id: str) -> None:
@@ -326,12 +366,21 @@ def extract_frames(session_id: str) -> Response:
         end_frame = request.args.get("end_frame", type=int, default=None)
 
         # Find the export folder for this session
-        session = inference_api._InferenceAPI__get_session(session_id)
-        video_path = session.get("video_path", "")
-        raw_name = os.path.splitext(os.path.basename(video_path))[0]
-        import re
-        safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_name)[:40] or "export"
-        export_folder = EXPORTS_PATH / safe_name
+        try:
+            session = inference_api._InferenceAPI__get_session(session_id)
+            video_path = session.get("video_path", "")
+            raw_name = os.path.splitext(os.path.basename(video_path))[0]
+            import re
+            safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_name)[:40] or "export"
+            export_folder = EXPORTS_PATH / safe_name
+        except RuntimeError:
+            # Session expired — find most recent export folder
+            import re
+            folders = sorted(
+                [f for f in EXPORTS_PATH.iterdir() if f.is_dir()],
+                key=lambda f: f.stat().st_mtime, reverse=True
+            ) if EXPORTS_PATH.exists() else []
+            export_folder = folders[0] if folders else EXPORTS_PATH
 
         # Prefer masked video, fall back to original
         video_file = export_folder / "masked.mp4"
