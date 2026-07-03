@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import {useAtomValue} from 'jotai';
-import {sessionAtom} from '@/demo/atoms';
+import {cropRangeAtom, sessionAtom} from '@/demo/atoms';
 import {useCallback, useState} from 'react';
 import OptionButton from './OptionButton';
 import {DocumentDownload} from '@carbon/icons-react';
@@ -22,6 +22,7 @@ import {DocumentDownload} from '@carbon/icons-react';
 export default function DownloadJSONOption() {
   const [downloading, setDownloading] = useState(false);
   const session = useAtomValue(sessionAtom);
+  const cropRange = useAtomValue(cropRangeAtom);
 
   const handleDownloadJSON = useCallback(async () => {
     if (!session) {
@@ -31,7 +32,16 @@ export default function DownloadJSONOption() {
 
     setDownloading(true);
     try {
-      const response = await fetch(`http://localhost:7263/export_session/${session.id}`);
+      // Pass crop range as query params so backend only exports cropped frames
+      const params = new URLSearchParams();
+      if (cropRange.startFrame > 0) {
+        params.set('start_frame', String(cropRange.startFrame));
+      }
+      if (cropRange.endFrame >= 0) {
+        params.set('end_frame', String(cropRange.endFrame));
+      }
+      const query = params.toString() ? `?${params.toString()}` : '';
+      const response = await fetch(`http://localhost:7263/export_session/${session.id}${query}`);
       if (!response.ok) {
         throw new Error('Failed to export session');
       }

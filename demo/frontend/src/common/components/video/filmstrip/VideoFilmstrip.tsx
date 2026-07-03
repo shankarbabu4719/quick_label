@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 import SelectedFrameHelper from '@/common/components/video/filmstrip/SelectedFrameHelper';
-import {isPlayingAtom} from '@/demo/atoms';
+import TimelineCropOverlay from '@/common/components/video/filmstrip/TimelineCropOverlay';
+import {cropRangeAtom, isPlayingAtom} from '@/demo/atoms';
 import stylex from '@stylexjs/stylex';
-import {useAtomValue, useSetAtom} from 'jotai';
+import {useAtom, useAtomValue, useSetAtom} from 'jotai';
 import {CanvasSpace, Pt} from 'pts';
-import {useCallback, useEffect, useMemo, useRef} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {PtsCanvas, PtsCanvasImperative} from 'react-pts-canvas';
 import {VideoRef} from '../Video';
 import {DecodeEvent, FrameUpdateEvent} from '../VideoWorkerBridge';
@@ -66,6 +67,12 @@ export default function VideoFilmstrip() {
   const filmstripRef = useRef<ImageBitmap | null>(null);
   const isPlayingOnPointerDownRef = useRef<boolean>(false);
   const isPlaying = useAtomValue(isPlayingAtom);
+
+  // Crop state — normalised 0..1 fractions (UI)
+  const [cropStart, setCropStart] = useState(0);
+  const [cropEnd, setCropEnd] = useState(1);
+  // Write integer frame values to global atom
+  const [, setCropRange] = useAtom(cropRangeAtom);
 
   const {enable: enableScrolling, disable: disableScrolling} =
     useDisableScrolling();
@@ -242,28 +249,19 @@ export default function VideoFilmstrip() {
             onPointerDown={event => {
               const canvas = ptsCanvasRef.current?.getCanvas();
               canvas?.setPointerCapture(event.pointerId);
-
-              // Disable page scrolling while interacting with the filmstrip
               disableScrolling();
-
               pointerPositionRef.current = getPointerPosition(event);
               selectedFrameHelper.scan(true);
-
-              // Pause the video when a user initially has their pointer down.
-              // Playback will resume once the onPointerUp event is triggered.
               isPlayingOnPointerDownRef.current = isPlaying;
               if (isPlaying) {
                 video?.pause();
               }
             }}
             onPointerUp={event => {
-              // Enable page scrolling after interaction with filmstrip is done
               enableScrolling();
-
               const space = ptsCanvasRef.current?.getSpace();
               if (space != undefined) {
                 pointerPositionRef.current = getPointerPosition(event);
-
                 selectedFrameHelper.scan(false);
                 const frame = computeFrame(
                   pointerPositionRef.current.x / space.size.x,
@@ -282,7 +280,6 @@ export default function VideoFilmstrip() {
                 }
                 handleAnimate();
               }
-
               pointerPositionRef.current = null;
             }}
             onPointerMove={event => {
@@ -292,7 +289,6 @@ export default function VideoFilmstrip() {
               ) {
                 return;
               }
-
               const space = ptsCanvasRef.current?.getSpace();
               const form = ptsCanvasRef.current?.getForm();
               if (
@@ -301,7 +297,6 @@ export default function VideoFilmstrip() {
                 form != null
               ) {
                 pointerPositionRef.current = getPointerPosition(event);
-
                 const frame = computeFrame(
                   pointerPositionRef.current.x / space.size.x,
                 );
@@ -315,6 +310,29 @@ export default function VideoFilmstrip() {
             }}
           />
         </div>
+
+        {/* Crop handles overlay */}
+        <TimelineCropOverlay
+          startFraction={cropStart}
+          endFraction={cropEnd}
+          onChange={(s, e) => {
+            setCropStart(s);
+            setCropEnd(e);
+          }}
+          onCommit={(s, e) => {
+            if (video != null) {
+              const total = video.numberOfFrames;
+              const startFrame = Math.round(s * (total - 1));
+              const endFrame   = Math.round(e * (total - 1));
+              // Write to global atom so propagation + export can read it
+              setCropRange({startFrame, endFrame});
+              // Seek video to crop start
+              video.frame = startFrame;
+              selectedFrameHelper.select(startFrame);
+              handleAnimate();
+            }
+          }}
+        />
       </div>
     </div>
   );

@@ -24,8 +24,16 @@ import {useEffect, useMemo} from 'react';
 import {graphql, useLazyLoadQuery} from 'react-relay';
 import {Location, useLocation} from 'react-router-dom';
 
+type DraftData = {
+  draft_id: string;
+  video_path: string;
+  video_url: string;
+  objects: Array<{object_id: number; label: string}>;
+};
+
 type LocationState = {
   video?: VideoData;
+  draft?: DraftData;
 };
 
 export default function DemoPage() {
@@ -48,6 +56,21 @@ export default function DemoPage() {
   const {setInputVideo} = useInputVideo();
 
   const video = useMemo(() => {
+    // If resuming a draft — build VideoData from draft's video_path/url
+    if (state?.draft != null) {
+      const draft = state.draft;
+      const path = draft.video_path;
+      const url = draft.video_url || `http://localhost:7263/${path}`;
+      return {
+        path,
+        url,
+        posterPath: null,
+        posterUrl: url,
+        width: 1280,
+        height: 720,
+      } as VideoData;
+    }
+    // Normal flow — use explicitly passed video or default
     return state?.video ?? data.defaultVideo;
   }, [state, data]);
 

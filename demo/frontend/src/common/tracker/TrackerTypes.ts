@@ -80,6 +80,7 @@ export type StreamMasksRequest = Request<
   'streamMasks',
   {
     frameIndex: number;
+    endFrameIndex?: number;
   }
 >;
 export type AbortStreamMasksRequest = Request<'abortStreamMasks', unknown>;

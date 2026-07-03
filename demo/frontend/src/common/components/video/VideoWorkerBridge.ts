@@ -442,9 +442,10 @@ export default class VideoWorkerBridge extends EventEmitter<VideoWorkerEventMap>
     });
   }
 
-  streamMasks(): void {
+  streamMasks(startFrameIndex?: number, endFrameIndex?: number): void {
     this.sendRequest<StreamMasksRequest>("streamMasks", {
-      frameIndex: 0,
+      frameIndex: startFrameIndex ?? 0,
+      endFrameIndex,
     });
   }
 

@@ -283,6 +283,7 @@ class InferenceAPI:
     ) -> Generator[PropagateDataResponse, None, None]:
         session_id = request.session_id
         start_frame_idx = request.start_frame_index
+        end_frame_idx = request.end_frame_index  # None means track all frames
         propagation_direction = "both"
         max_frame_num_to_track = None
 
@@ -321,6 +322,11 @@ class InferenceAPI:
                             return None
 
                         frame_idx, obj_ids, video_res_masks = outputs
+
+                        # Stop at end_frame_idx if crop range is set
+                        if end_frame_idx is not None and frame_idx > end_frame_idx:
+                            break
+
                         masks_binary = (
                             (video_res_masks > self.score_thresh)[:, 0].cpu().numpy()
                         )
@@ -352,6 +358,10 @@ class InferenceAPI:
                             return None
 
                         frame_idx, obj_ids, video_res_masks = outputs
+                        # Stop backward propagation at crop start_frame_idx
+                        if frame_idx < start_frame_idx:
+                            break
+
                         masks_binary = (
                             (video_res_masks > self.score_thresh)[:, 0].cpu().numpy()
                         )
@@ -449,7 +459,7 @@ class InferenceAPI:
             logger.info(f"removed session {session_id}; {self.__get_session_stats()}")
             return True
 
-    def export_session(self, session_id: str) -> dict:
+    def export_session(self, session_id: str, start_frame: int = None, end_frame: int = None) -> dict:
         with self.autocast_context(), self.inference_lock:
             session = self.__get_session(session_id)
             inference_state = session["state"]
@@ -477,11 +487,17 @@ class InferenceAPI:
                 "frames": []
             }
             
-            # Add frame data
+            # Add frame data — filter by crop range if provided
             if "masks_per_frame" in session:
                 for frame_idx, masks in sorted(session["masks_per_frame"].items()):
+                    fi = int(frame_idx)
+                    # Skip frames outside the crop range
+                    if start_frame is not None and fi < start_frame:
+                        continue
+                    if end_frame is not None and fi > end_frame:
+                        continue
                     export_data["frames"].append({
-                        "frame_index": frame_idx,
+                        "frame_index": fi,
                         "masks": masks
                     })
             

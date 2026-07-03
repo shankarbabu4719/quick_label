@@ -15,6 +15,7 @@
  */
 import type {VideoGalleryTriggerProps} from '@/common/components/gallery/DemoVideoGalleryModal';
 import DemoVideoGalleryModal from '@/common/components/gallery/DemoVideoGalleryModal';
+import useSaveDraft from '@/common/components/session/useSaveDraft';
 import useVideo from '@/common/components/video/editor/useVideo';
 import Logger from '@/common/logger/Logger';
 import {isStreamingAtom, uploadingStateAtom, VideoData} from '@/demo/atoms';
@@ -37,6 +38,7 @@ export default function ChangeVideoModal({
   const setUploadingState = useSetAtom(uploadingStateAtom);
   const video = useVideo();
   const navigate = useNavigate();
+  const {saveDraft} = useSaveDraft();
 
   const handlePause = useCallback(() => {
     video?.pause();
@@ -50,7 +52,10 @@ export default function ChangeVideoModal({
     }
   }
 
-  function handleSwitchVideos(video: VideoData) {
+  async function handleSwitchVideos(video: VideoData) {
+    // Auto-save current work as a draft before switching
+    await saveDraft();
+
     // Retain any search parameter
     navigate(
       {

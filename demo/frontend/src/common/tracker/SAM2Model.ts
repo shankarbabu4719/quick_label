@@ -494,7 +494,7 @@ export class SAM2Model extends Tracker {
     });
   }
 
-  public async streamMasks(frameIndex: number): Promise<void> {
+  public async streamMasks(startFrameIndex?: number, endFrameIndex?: number): Promise<void> {
     const sessionId = this._session.id;
     if (sessionId === null) {
       return Promise.reject('No active session');
@@ -514,7 +514,8 @@ export class SAM2Model extends Tracker {
       const generator = this._streamMasksForSession(
         controller,
         sessionId,
-        frameIndex,
+        startFrameIndex ?? 0,
+        endFrameIndex,
       );
 
       // 3. parse stream response and update masks in session objects
@@ -718,13 +719,19 @@ export class SAM2Model extends Tracker {
     abortController: AbortController,
     sessionId: string,
     startFrameIndex: undefined | number = 0,
+    endFrameIndex: undefined | number = undefined,
   ): AsyncGenerator<StreamMasksResult | StreamMasksAbortResult, undefined> {
     const url = `${this._endpoint}/propagate_in_video`;
 
-    const requestBody = {
+    const requestBody: Record<string, unknown> = {
       session_id: sessionId,
       start_frame_index: startFrameIndex,
     };
+
+    // Only include end_frame_index if explicitly set
+    if (endFrameIndex !== undefined && endFrameIndex >= 0) {
+      requestBody.end_frame_index = endFrameIndex;
+    }
 
     const headers: {[name: string]: string} = Object.assign({
       'Content-Type': 'application/json',
