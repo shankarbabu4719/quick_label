@@ -72,7 +72,7 @@ export default function DownloadJSONOption() {
   }, [session]);
 
   return (
-    <div className="mt-4">
+    <div style={{width: '100%'}}>
       <OptionButton
         title="Download Tracking JSON"
         Icon={DocumentDownload}
