@@ -402,23 +402,26 @@ def extract_frames(session_id: str) -> Response:
             os.makedirs(frames_dir)
 
             # Build ffmpeg command to extract frames at given FPS
-            cmd = [ffmpeg, "-y", "-i", str(video_file)]
+            cmd = [ffmpeg, "-y"]
 
             # Apply time range if start_frame/end_frame provided
             # Assume 30fps source for frame-to-time conversion
             source_fps = 30.0
-            if start_frame is not None:
+            if start_frame is not None and start_frame > 0:
                 cmd += ["-ss", str(start_frame / source_fps)]
-            if end_frame is not None and start_frame is not None:
-                duration = (end_frame - start_frame) / source_fps
+
+            cmd += ["-i", str(video_file)]
+
+            if end_frame is not None:
+                if start_frame is not None and start_frame > 0:
+                    duration = (end_frame - start_frame) / source_fps
+                else:
+                    duration = end_frame / source_fps
                 cmd += ["-t", str(duration)]
-            elif end_frame is not None:
-                cmd += ["-t", str(end_frame / source_fps)]
 
             cmd += [
                 "-vf", f"fps={fps}",
-                "-q:v", "2",
-                os.path.join(frames_dir, "frame_%06d.jpg")
+                os.path.join(frames_dir, "frame_%06d.png")
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
