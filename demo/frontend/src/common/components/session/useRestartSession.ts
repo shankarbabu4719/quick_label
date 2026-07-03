@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import useMessagesSnackbar from '@/common/components/snackbar/useDemoMessagesSnackbar';
+import useSaveDraft from '@/common/components/session/useSaveDraft';
 import useVideo from '@/common/components/video/editor/useVideo';
 import useInputVideo from '@/common/components/video/useInputVideo';
 import {
@@ -34,6 +35,7 @@ export default function useRestartSession() {
   const setTracklets = useSetAtom(trackletObjectsAtom);
   const setLabelType = useSetAtom(labelTypeAtom);
   const {clearMessage} = useMessagesSnackbar();
+  const {saveDraft} = useSaveDraft();
 
   const {inputVideo} = useInputVideo();
   const video = useVideo();
@@ -50,6 +52,11 @@ export default function useRestartSession() {
     if (isStreaming) {
       await video.abortStreamMasks();
     }
+
+    // Auto-save current work as a draft before resetting
+    await saveDraft();
+    console.log('[Draft] saved before restart, session:', session?.id, 'video:', inputVideo?.path);
+
     await video?.startSession(inputVideo.path);
     video.frame = 0;
     setActiveTrackletObjectId(0);

@@ -127,9 +127,9 @@ self.addEventListener(
           await tracker?.clearPointsInVideo();
           break;
         case 'streamMasks': {
-          const {frameIndex} = event.data;
+          const {frameIndex, endFrameIndex} = event.data as {frameIndex: number; endFrameIndex?: number};
           context.allowEffectAnimation(false);
-          await tracker?.streamMasks(frameIndex);
+          await tracker?.streamMasks(frameIndex, endFrameIndex);
           break;
         }
         case 'abortStreamMasks':

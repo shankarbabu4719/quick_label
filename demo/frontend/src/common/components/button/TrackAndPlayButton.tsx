@@ -19,6 +19,7 @@ import useFunctionThrottle from '@/common/components/useFunctionThrottle';
 import useVideo from '@/common/components/video/editor/useVideo';
 import {
   areTrackletObjectsInitializedAtom,
+  cropRangeAtom,
   isStreamingAtom,
   sessionAtom,
   streamingStateAtom,
@@ -33,6 +34,7 @@ export default function TrackAndPlayButton() {
   const streamingState = useAtomValue(streamingStateAtom);
   const areObjectsInitialized = useAtomValue(areTrackletObjectsInitializedAtom);
   const setSession = useSetAtom(sessionAtom);
+  const cropRange = useAtomValue(cropRangeAtom);
   const {enqueueMessage} = useMessagesSnackbar();
   const {isThrottled, maxThrottles, throttle} = useFunctionThrottle(250, 4);
 
@@ -73,7 +75,10 @@ export default function TrackAndPlayButton() {
       () => {
         if (!isStreaming) {
           enqueueMessage('trackAndPlayClick');
-          video?.streamMasks();
+          // Pass crop start and end frames so propagation works only within crop range
+          const startFrame = cropRange.startFrame > 0 ? cropRange.startFrame : undefined;
+          const endFrame = cropRange.endFrame >= 0 ? cropRange.endFrame : undefined;
+          video?.streamMasks(startFrame, endFrame);
           setSession(previousSession =>
             previousSession == null
               ? previousSession
@@ -92,6 +97,7 @@ export default function TrackAndPlayButton() {
     maxThrottles,
     video,
     setSession,
+    cropRange,
     enqueueMessage,
     throttle,
   ]);

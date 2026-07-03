@@ -16,12 +16,33 @@
 import LoadingStateScreen from '@/common/loading/LoadingStateScreen';
 import {FallbackProps} from 'react-error-boundary';
 
-export default function DemoErrorFallback(_props: FallbackProps) {
+export default function DemoErrorFallback({error, resetErrorBoundary}: FallbackProps) {
   return (
     <LoadingStateScreen
-      title="Well, this is embarrassing..."
-      description="This demo is not optimized for your device. Please try again on a different device with a larger screen."
-      linkProps={{to: '..', label: 'Back to homepage'}}
+      title="Something went wrong"
+      description={
+        <div style={{textAlign: 'center'}}>
+          <p style={{marginBottom: 12, color: '#A7B3BF'}}>
+            {error?.message ?? 'An unexpected error occurred.'}
+          </p>
+          <button
+            onClick={resetErrorBoundary}
+            style={{
+              marginTop: 8,
+              padding: '8px 20px',
+              background: '#6366f1',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 600,
+            }}>
+            Try again
+          </button>
+        </div>
+      }
+      linkProps={{to: '/', label: 'Back to Projects'}}
     />
   );
 }

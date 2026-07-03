@@ -21,6 +21,7 @@ import RelayEnvironmentProvider from '@/graphql/RelayEnvironmentProvider';
 import RootLayout from '@/layouts/RootLayout';
 import SAM2DemoPage from '@/routes/DemoPageWrapper';
 import PageNotFoundPage from '@/routes/PageNotFoundPage';
+import ProjectHubPage from '@/routes/ProjectHubPage';
 import useSettingsContext from '@/settings/useSettingsContext';
 import {Route, Routes} from 'react-router-dom';
 
@@ -40,8 +41,12 @@ function DemoApp() {
   return (
     <>
       <Routes>
+        {/* Home page — Project Hub with drafts + previous projects */}
+        <Route index={true} element={<ProjectHubPage />} />
+
+        {/* Editor — wrapped in RootLayout with toolbar */}
         <Route element={<RootLayout />}>
-          <Route index={true} element={<SAM2DemoPage />} />
+          <Route path="demo" element={<SAM2DemoPage />} />
           <Route path="*" element={<PageNotFoundPage />} />
         </Route>
       </Routes>

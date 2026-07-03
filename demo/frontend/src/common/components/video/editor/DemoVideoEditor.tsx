@@ -15,6 +15,7 @@
  */
 import TrackletsAnnotation from '@/common/components/annotations/TrackletsAnnotation';
 import useCloseSessionBeforeUnload from '@/common/components/session/useCloseSessionBeforeUnload';
+import useSaveDraftBeforeUnload from '@/common/components/session/useSaveDraftBeforeUnload';
 import MessagesSnackbar from '@/common/components/snackbar/MessagesSnackbar';
 import useMessagesSnackbar from '@/common/components/snackbar/useDemoMessagesSnackbar';
 import {OBJECT_TOOLBAR_INDEX} from '@/common/components/toolbar/ToolbarConfig';
@@ -37,6 +38,7 @@ import useScreenSize from '@/common/screen/useScreenSize';
 import {SegmentationPoint} from '@/common/tracker/Tracker';
 import {
   activeTrackletObjectIdAtom,
+  cropRangeAtom,
   frameIndexAtom,
   isAddObjectEnabledAtom,
   isPlayingAtom,
@@ -52,7 +54,7 @@ import useSettingsContext from '@/settings/useSettingsContext';
 import {color, spacing} from '@/theme/tokens.stylex';
 import stylex from '@stylexjs/stylex';
 import {useAtom, useAtomValue, useSetAtom} from 'jotai';
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import type {ErrorObject} from 'serialize-error';
 
 const styles = stylex.create({
@@ -100,6 +102,10 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
     useState<boolean>(false);
 
   const [session, setSession] = useAtom(sessionAtom);
+  // Use a ref so crop range changes never re-trigger the session useEffect
+  const cropRange = useAtomValue(cropRangeAtom);
+  const cropRangeRef = useRef(cropRange);
+  cropRangeRef.current = cropRange;
 
   const [activeTrackletId, setActiveTrackletObjectId] = useAtom(
     activeTrackletObjectIdAtom,
@@ -123,6 +129,7 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
   const {enqueueMessage} = useMessagesSnackbar();
 
   useCloseSessionBeforeUnload();
+  useSaveDraftBeforeUnload();
 
   const {resetEditor, resetSession} = useResetDemoEditor();
   useEffect(() => {
@@ -140,6 +147,11 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
 
     function onSessionStarted(event: SessionStartedEvent) {
       setSession({id: event.sessionId, ranPropagation: false});
+      // Seek to crop start frame after session starts (use ref to avoid re-triggering effect)
+      const cr = cropRangeRef.current;
+      if (cr.startFrame > 0 && video != null) {
+        video.frame = cr.startFrame;
+      }
     }
 
     video?.addEventListener('sessionStarted', onSessionStarted);

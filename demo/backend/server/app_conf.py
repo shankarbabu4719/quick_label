@@ -22,9 +22,9 @@ FFMPEG_NUM_THREADS = int(os.getenv("FFMPEG_NUM_THREADS", "1"))
 # Path for all data used in API
 DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
 
-# Max duration an uploaded video can have in seconds. The default is 10
-# seconds.
-MAX_UPLOAD_VIDEO_DURATION = float(os.environ.get("MAX_UPLOAD_VIDEO_DURATION", "10"))
+# Max duration an uploaded video can have in seconds. The default is 120
+# seconds (2 minutes). User can upload longer videos for object tracking.
+MAX_UPLOAD_VIDEO_DURATION = float(os.environ.get("MAX_UPLOAD_VIDEO_DURATION", "120"))
 
 # If set, it will define which video is returned by the default video query for
 # desktop
@@ -54,9 +54,16 @@ EXPORTS_PREFIX = "exports"
 # Path where tracking exports are stored
 EXPORTS_PATH = DATA_PATH / EXPORTS_PREFIX
 
+# Prefix for draft sessions (incomplete work in progress)
+DRAFTS_PREFIX = "drafts"
+
+# Path where draft sessions are stored
+DRAFTS_PATH = DATA_PATH / DRAFTS_PREFIX
+
 # Make sure any of those paths exist
 os.makedirs(DATA_PATH, exist_ok=True)
 os.makedirs(GALLERY_PATH, exist_ok=True)
 os.makedirs(UPLOADS_PATH, exist_ok=True)
 os.makedirs(POSTERS_PATH, exist_ok=True)
 os.makedirs(EXPORTS_PATH, exist_ok=True)
+os.makedirs(DRAFTS_PATH, exist_ok=True)

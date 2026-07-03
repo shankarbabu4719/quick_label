@@ -181,3 +181,17 @@ export const messageMapAtom = atom<MessagesEventMap>(defaultMessageMap);
 export const uploadingStateAtom = atom<'default' | 'uploading' | 'error'>(
   'default',
 );
+
+// #####################
+// Crop / Trim range
+// #####################
+
+export type CropRange = {
+  startFrame: number;
+  endFrame: number;   // -1 means "use all frames"
+};
+
+export const cropRangeAtom = atom<CropRange>({
+  startFrame: 0,
+  endFrame: -1,
+});

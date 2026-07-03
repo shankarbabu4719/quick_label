@@ -17,6 +17,8 @@ from app_conf import (
     UPLOADS_PREFIX,
     EXPORTS_PATH,
     EXPORTS_PREFIX,
+    DRAFTS_PATH,
+    DRAFTS_PREFIX,
 )
 from data.loader import preload_data
 from data.schema import schema
@@ -101,7 +103,13 @@ def export_session(session_id: str) -> Response:
     import shutil
 
     try:
-        export_data = inference_api.export_session(session_id)
+        # Optional crop range from query params
+        start_frame = request.args.get("start_frame", type=int, default=None)
+        end_frame = request.args.get("end_frame", type=int, default=None)
+
+        export_data = inference_api.export_session(
+            session_id, start_frame=start_frame, end_frame=end_frame
+        )
         export_folder = _get_session_export_folder(session_id)
 
         # 1. Save tracking JSON
@@ -118,6 +126,9 @@ def export_session(session_id: str) -> Response:
                 shutil.copy2(video_path, dest)
                 logger.info(f"Copied original video to {dest}")
 
+        # 3. Delete any draft for this session (project is now complete)
+        _delete_draft_for_session(session_id)
+
         # Return JSON as download to browser
         response = make_response(json.dumps(export_data, ensure_ascii=False, indent=2))
         response.headers["Content-Type"] = "application/json"
@@ -128,6 +139,28 @@ def export_session(session_id: str) -> Response:
     except Exception as e:
         logger.error(f"Error exporting session {session_id}: {e}")
         return make_response(f"Error exporting session: {e}", 500)
+
+
+def _delete_draft_for_session(session_id: str) -> None:
+    """
+    Delete any draft that matches the given session_id.
+    Called when a project is completed (exported to Previous Projects).
+    """
+    import json
+    try:
+        for draft_file in DRAFTS_PATH.glob("draft_*.json"):
+            try:
+                with open(draft_file, "r", encoding="utf-8") as f:
+                    draft = json.load(f)
+                if draft.get("session_id") == session_id:
+                    draft_file.unlink()
+                    logger.info(f"Deleted draft {draft_file.name} for completed session {session_id}")
+                    break
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning(f"Could not clean up draft for session {session_id}: {e}")
+
 
 
 @app.route("/save_masked_video/<session_id>", methods=["POST"])
@@ -150,6 +183,50 @@ def save_masked_video(session_id: str) -> Response:
         return make_response(f"Error saving masked video: {e}", 500)
 
 
+@app.route("/list_exports", methods=["GET"])
+def list_exports() -> Response:
+    """
+    List all previous export projects.
+    Returns: [{
+        name: folder_name,
+        hasJson: bool,
+        hasOriginal: bool,
+        hasMasked: bool,
+        thumbnailUrl: url to poster/thumbnail
+    }]
+    """
+    try:
+        exports = []
+        if not EXPORTS_PATH.exists():
+            return make_response({"exports": []}, 200)
+
+        for folder in EXPORTS_PATH.iterdir():
+            if not folder.is_dir():
+                continue
+
+            export_info = {
+                "name": folder.name,
+                "hasJson": (folder / "tracking.json").exists(),
+                "hasOriginal": (folder / "original.mp4").exists(),
+                "hasMasked": (folder / "masked.mp4").exists(),
+                "thumbnailUrl": None,
+            }
+
+            # Generate thumbnail URL if original video exists
+            if export_info["hasOriginal"]:
+                export_info["thumbnailUrl"] = f"{EXPORTS_PREFIX}/{folder.name}/original.mp4"
+
+            exports.append(export_info)
+
+        # Sort by modification time (newest first)
+        exports.sort(key=lambda x: (EXPORTS_PATH / x["name"]).stat().st_mtime, reverse=True)
+
+        return make_response({"exports": exports}, 200)
+    except Exception as e:
+        logger.error(f"Error listing exports: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
 @app.route(f"/{EXPORTS_PREFIX}/<path:path>", methods=["GET"])
 def send_exported_file(path: str):
     try:
@@ -159,6 +236,230 @@ def send_exported_file(path: str):
         raise ValueError("resource not found")
 
 
+# ---------------------------------------------------------------------------
+# DRAFT API  — save / list / delete in-progress sessions
+# ---------------------------------------------------------------------------
+
+@app.route("/trim_video/<session_id>", methods=["POST"])
+def trim_video(session_id: str) -> Response:
+    """
+    Trim the session's video to the given frame range using ffmpeg.
+    The trimmed video replaces the original in the uploads folder.
+
+    Body JSON: { "start_frame": int, "end_frame": int, "fps": float }
+    """
+    import json, shutil, subprocess, tempfile
+
+    try:
+        body = request.get_json(force=True) or {}
+        start_frame = body.get("start_frame", 0)
+        end_frame = body.get("end_frame", None)
+        fps = body.get("fps", 30.0)
+
+        # Get video path from session
+        session = inference_api._InferenceAPI__get_session(session_id)
+        video_path = session.get("video_path", "")
+
+        if not video_path or not os.path.isfile(video_path):
+            return make_response({"error": "Video file not found"}, 404)
+
+        # Convert frames to timestamps
+        start_sec = start_frame / fps
+        duration_sec = ((end_frame - start_frame) / fps) if end_frame is not None else None
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return make_response({"error": "ffmpeg not found"}, 500)
+
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        cmd = [ffmpeg, "-y", "-i", video_path, "-ss", str(start_sec)]
+        if duration_sec is not None:
+            cmd += ["-t", str(duration_sec)]
+        cmd += ["-c", "copy", tmp_path]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"ffmpeg trim failed: {result.stderr}")
+            return make_response({"error": "ffmpeg trim failed", "details": result.stderr}, 500)
+
+        # Replace original video with trimmed version
+        shutil.move(tmp_path, video_path)
+        logger.info(f"Trimmed video {video_path} to frames {start_frame}-{end_frame}")
+
+        # Update session video path (same path, just trimmed)
+        return make_response({"success": True, "video_path": video_path}, 200)
+
+    except RuntimeError as e:
+        # Session not found — trim not possible, not fatal
+        logger.warning(f"trim_video: session {session_id} not found: {e}")
+        return make_response({"error": str(e)}, 404)
+    except Exception as e:
+        logger.error(f"Error trimming video for session {session_id}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/save_draft", methods=["POST"])
+def save_draft() -> Response:
+    """
+    Save the current session state as a draft so the user can resume later.
+
+    Expects JSON body:
+    {
+        "session_id": "...",
+        "video_path": "gallery/05_default_juggle.mp4",
+        "video_url":  "http://localhost:7263/gallery/...",
+        "objects": [{"object_id": 0, "label": "Ball"}, ...]
+    }
+
+    Saves to: drafts/{draft_id}.json
+    Returns: { "draft_id": "..." }
+    """
+    import json
+    import time
+
+    try:
+        body = request.get_json(force=True) or {}
+        session_id = body.get("session_id", "")
+        video_path = body.get("video_path", "")
+        video_url  = body.get("video_url", "")
+        objects    = body.get("objects", [])
+
+        # Pull masks_per_frame from the live session if it still exists
+        masks_per_frame: dict = {}
+        try:
+            session = inference_api._InferenceAPI__get_session(session_id)
+            masks_per_frame = session.get("masks_per_frame", {})
+            # Convert int keys to str for JSON serialisation
+            masks_per_frame = {str(k): v for k, v in masks_per_frame.items()}
+        except Exception:
+            pass  # session already gone — save whatever the frontend sent
+
+        draft_id = f"draft_{int(time.time() * 1000)}"
+        draft = {
+            "draft_id":       draft_id,
+            "session_id":     session_id,
+            "video_path":     video_path,
+            "video_url":      video_url,
+            "objects":        objects,
+            "masks_per_frame": masks_per_frame,
+            "saved_at":       int(time.time() * 1000),
+        }
+
+        draft_file = DRAFTS_PATH / f"{draft_id}.json"
+        with open(draft_file, "w", encoding="utf-8") as f:
+            json.dump(draft, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"Saved draft {draft_id} for video {video_path}")
+        return make_response({"draft_id": draft_id}, 200)
+
+    except Exception as e:
+        logger.error(f"Error saving draft: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/list_drafts", methods=["GET"])
+def list_drafts() -> Response:
+    """
+    List all saved drafts.
+
+    Returns:
+    {
+        "drafts": [
+            {
+                "draft_id":   "draft_1234567890",
+                "video_path": "gallery/05_default_juggle.mp4",
+                "video_url":  "http://...",
+                "objects":    [...],
+                "saved_at":   1234567890000,
+                "thumbnail_url": "http://..." or null
+            },
+            ...
+        ]
+    }
+    """
+    import json
+
+    try:
+        drafts = []
+        for draft_file in sorted(DRAFTS_PATH.glob("draft_*.json"), reverse=True):
+            try:
+                with open(draft_file, "r", encoding="utf-8") as f:
+                    draft = json.load(f)
+
+                # Build a thumbnail URL from the video path
+                video_path = draft.get("video_path", "")
+                thumbnail_url = None
+                if video_path:
+                    # For gallery videos use their poster; for uploads use the video itself
+                    if video_path.startswith("gallery/"):
+                        stem = video_path.replace("gallery/", "").replace(".mp4", "")
+                        thumbnail_url = f"http://localhost:7263/posters/{stem}.jpg"
+                    elif video_path.startswith("uploads/"):
+                        thumbnail_url = f"http://localhost:7263/{video_path}"
+
+                drafts.append({
+                    "draft_id":     draft.get("draft_id"),
+                    "video_path":   video_path,
+                    "video_url":    draft.get("video_url", ""),
+                    "objects":      draft.get("objects", []),
+                    "saved_at":     draft.get("saved_at", 0),
+                    "thumbnail_url": thumbnail_url,
+                    "mask_frame_count": len(draft.get("masks_per_frame", {})),
+                })
+            except Exception as parse_err:
+                logger.warning(f"Could not parse draft file {draft_file}: {parse_err}")
+                continue
+
+        return make_response({"drafts": drafts}, 200)
+
+    except Exception as e:
+        logger.error(f"Error listing drafts: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/delete_draft/<draft_id>", methods=["DELETE"])
+def delete_draft(draft_id: str) -> Response:
+    """
+    Delete a saved draft by its ID.
+    """
+    try:
+        draft_file = DRAFTS_PATH / f"{draft_id}.json"
+        if draft_file.exists():
+            draft_file.unlink()
+            logger.info(f"Deleted draft {draft_id}")
+            return make_response({"success": True}, 200)
+        else:
+            return make_response({"error": "Draft not found"}, 404)
+    except Exception as e:
+        logger.error(f"Error deleting draft {draft_id}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/load_draft/<draft_id>", methods=["GET"])
+def load_draft(draft_id: str) -> Response:
+    """
+    Load a saved draft — returns the full draft JSON including masks.
+    Frontend uses this to restore session state.
+    """
+    import json
+
+    try:
+        draft_file = DRAFTS_PATH / f"{draft_id}.json"
+        if not draft_file.exists():
+            return make_response({"error": "Draft not found"}, 404)
+
+        with open(draft_file, "r", encoding="utf-8") as f:
+            draft = json.load(f)
+
+        return make_response(json.dumps(draft), 200)
+
+    except Exception as e:
+        logger.error(f"Error loading draft {draft_id}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
 # TOOD: Protect route with ToS permission check
 @app.route("/propagate_in_video", methods=["POST"])
 def propagate_in_video() -> Response:
@@ -166,6 +467,7 @@ def propagate_in_video() -> Response:
     args = {
         "session_id": data["session_id"],
         "start_frame_index": data.get("start_frame_index", 0),
+        "end_frame_index": data.get("end_frame_index", None),
     }
 
     boundary = "frame"
@@ -177,12 +479,14 @@ def gen_track_with_mask_stream(
     boundary: str,
     session_id: str,
     start_frame_index: int,
+    end_frame_index: int = None,
 ) -> Generator[bytes, None, None]:
     with inference_api.autocast_context():
         request = PropagateInVideoRequest(
             type="propagate_in_video",
             session_id=session_id,
             start_frame_index=start_frame_index,
+            end_frame_index=end_frame_index,
         )
 
         for chunk in inference_api.propagate_in_video(request=request):
@@ -223,4 +527,4 @@ app.add_url_rule(
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=7263, threaded=True)
