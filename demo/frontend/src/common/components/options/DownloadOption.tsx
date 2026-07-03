@@ -24,10 +24,7 @@ export default function DownloadOption() {
   const session = useAtomValue(sessionAtom);
 
   async function handleDownload() {
-    // 1. Encode video and save to browser Downloads
     const file = await download(true);
-
-    // 2. Automatically save masked video to backend exports folder
     if (session?.id && file) {
       try {
         await fetch(`http://localhost:7263/save_masked_video/${session.id}`, {
@@ -42,14 +39,16 @@ export default function DownloadOption() {
   }
 
   return (
-    <OptionButton
-      title="Download"
-      Icon={Package}
-      loadingProps={{
-        loading: state === 'started' || state === 'encoding',
-        label: 'Downloading...',
-      }}
-      onClick={handleDownload}
-    />
+    <div style={{width: '100%'}}>
+      <OptionButton
+        title="Download Masked Video"
+        Icon={Package}
+        loadingProps={{
+          loading: state === 'started' || state === 'encoding',
+          label: 'Encoding...',
+        }}
+        onClick={handleDownload}
+      />
+    </div>
   );
 }

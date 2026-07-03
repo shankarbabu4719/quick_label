@@ -307,6 +307,97 @@ def trim_video(session_id: str) -> Response:
         return make_response({"error": str(e)}, 500)
 
 
+@app.route("/extract_frames/<session_id>", methods=["GET"])
+def extract_frames(session_id: str) -> Response:
+    """
+    Extract frames from the exported masked video at a given FPS and
+    return them as a ZIP file.
+
+    Query params:
+      fps         - frames per second to extract (default: 5)
+      start_frame - first frame index (optional, uses crop range)
+      end_frame   - last frame index (optional, uses crop range)
+    """
+    import json, shutil, subprocess, tempfile, zipfile
+
+    try:
+        fps = float(request.args.get("fps", 5))
+        start_frame = request.args.get("start_frame", type=int, default=None)
+        end_frame = request.args.get("end_frame", type=int, default=None)
+
+        # Find the export folder for this session
+        session = inference_api._InferenceAPI__get_session(session_id)
+        video_path = session.get("video_path", "")
+        raw_name = os.path.splitext(os.path.basename(video_path))[0]
+        import re
+        safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_name)[:40] or "export"
+        export_folder = EXPORTS_PATH / safe_name
+
+        # Prefer masked video, fall back to original
+        video_file = export_folder / "masked.mp4"
+        if not video_file.exists():
+            video_file = export_folder / "original.mp4"
+        if not video_file.exists():
+            # Use session video path directly
+            video_file = video_path
+
+        if not os.path.isfile(str(video_file)):
+            return make_response({"error": "No video found for this session"}, 404)
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return make_response({"error": "ffmpeg not found"}, 500)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            frames_dir = os.path.join(tmpdir, "frames")
+            os.makedirs(frames_dir)
+
+            # Build ffmpeg command to extract frames at given FPS
+            cmd = [ffmpeg, "-y", "-i", str(video_file)]
+
+            # Apply time range if start_frame/end_frame provided
+            # Assume 30fps source for frame-to-time conversion
+            source_fps = 30.0
+            if start_frame is not None:
+                cmd += ["-ss", str(start_frame / source_fps)]
+            if end_frame is not None and start_frame is not None:
+                duration = (end_frame - start_frame) / source_fps
+                cmd += ["-t", str(duration)]
+            elif end_frame is not None:
+                cmd += ["-t", str(end_frame / source_fps)]
+
+            cmd += [
+                "-vf", f"fps={fps}",
+                "-q:v", "2",
+                os.path.join(frames_dir, "frame_%06d.jpg")
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                logger.error(f"ffmpeg extract failed: {result.stderr}")
+                return make_response({"error": "Failed to extract frames"}, 500)
+
+            # Package frames into ZIP
+            zip_path = os.path.join(tmpdir, "frames.zip")
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fname in sorted(os.listdir(frames_dir)):
+                    zf.write(os.path.join(frames_dir, fname), fname)
+
+            with open(zip_path, "rb") as f:
+                zip_data = f.read()
+
+        response = make_response(zip_data)
+        response.headers["Content-Type"] = "application/zip"
+        response.headers["Content-Disposition"] = f"attachment; filename=frames_{fps}fps.zip"
+        return response
+
+    except RuntimeError as e:
+        return make_response({"error": str(e)}, 404)
+    except Exception as e:
+        logger.error(f"Error extracting frames: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
 @app.route("/save_draft", methods=["POST"])
 def save_draft() -> Response:
     """
