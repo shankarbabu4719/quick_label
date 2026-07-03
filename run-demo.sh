@@ -2,29 +2,10 @@
 
 # Script to run both SAM 2 frontend and backend together
 
-# Kill anything already running on our ports
-kill_ports() {
-  for PORT in 7262 7263; do
-    PIDS=$(lsof -ti :$PORT 2>/dev/null)
-    if [ -n "$PIDS" ]; then
-      echo "⚠️  Port $PORT in use — killing old processes..."
-      echo "$PIDS" | xargs kill -9 2>/dev/null
-      sleep 1
-    fi
-  done
-  # Also kill any leftover gunicorn/vite processes from this project
-  pkill -f "gunicorn.*app:app" 2>/dev/null
-  pkill -f "vite.*7262" 2>/dev/null
-  sleep 1
-}
-
 # Function to handle cleanup (kill child processes on exit)
 cleanup() {
-  echo ""
-  echo "🛑 Shutting down services..."
+  echo "Shutting down services..."
   kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
-  pkill -f "gunicorn.*app:app" 2>/dev/null
-  pkill -f "vite.*7262" 2>/dev/null
   exit
 }
 
@@ -36,9 +17,6 @@ PROJECT_ROOT="$(dirname "$0")"
 cd "$PROJECT_ROOT"
 
 echo "🚀 Starting SAM 2 Demo..."
-
-# Kill old processes before starting fresh
-kill_ports
 
 # Activate virtual environment
 echo "📦 Activating virtual environment..."
