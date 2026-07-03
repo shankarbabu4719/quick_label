@@ -271,6 +271,10 @@ export default class VideoWorkerBridge extends EventEmitter<VideoWorkerEventMap>
     this.sendRequest<PauseRequest>('pause');
   }
 
+  public setCropRange(startFrame: number, endFrame: number): void {
+    this.sendRequest('setCropRange', {startFrame, endFrame});
+  }
+
   public stop(): void {
     this.sendRequest<StopRequest>('stop');
   }

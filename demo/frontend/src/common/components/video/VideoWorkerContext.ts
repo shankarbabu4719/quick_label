@@ -98,6 +98,9 @@ export default class VideoWorkerContext {
   private _playbackRAFHandle: number | null = null;
   private _playbackTimeoutHandle: NodeJS.Timeout | null = null;
   private _isDrawing: boolean = false;
+  // Crop range — playback and seek stay within these bounds (0 = no limit)
+  private _cropStartFrame: number = 0;
+  private _cropEndFrame: number = -1; // -1 = no limit
   private _glObjects: WebGL2RenderingContext | null = null;
   private _glBackground: WebGL2RenderingContext | null = null;
   private _canvasHighlights: OffscreenCanvas | null = null;
@@ -218,8 +221,28 @@ export default class VideoWorkerContext {
   public goToFrame(index: number): void {
     // Cancel any ongoing render
     this._cancelRender();
-    this.updateFrameIndex(index);
+    // Clamp to crop range
+    const clamped = this._clampToCrop(index);
+    this.updateFrameIndex(clamped);
     this._playbackRAFHandle = requestAnimationFrame(this._drawFrame.bind(this));
+  }
+
+  public setCropRange(startFrame: number, endFrame: number): void {
+    this._cropStartFrame = startFrame;
+    this._cropEndFrame = endFrame;
+    // Seek to crop start if current frame is outside range
+    if (this._frameIndex < startFrame) {
+      this.goToFrame(startFrame);
+    } else if (endFrame >= 0 && this._frameIndex > endFrame) {
+      this.goToFrame(startFrame);
+    }
+  }
+
+  private _clampToCrop(index: number): number {
+    const total = this._decodedVideo?.frames.length ?? 0;
+    const start = this._cropStartFrame;
+    const end = this._cropEndFrame >= 0 ? this._cropEndFrame : total - 1;
+    return Math.max(start, Math.min(end, index));
   }
 
   public play(): void {
@@ -248,8 +271,13 @@ export default class VideoWorkerContext {
       this._stats.fps?.begin();
 
       const diff = time - startTime;
-      const expectedFrame =
-        (Math.floor(diff / timePerFrame) + offsetFrameIndex) % numFrames;
+      // Playback loops within crop range only
+      const cropStart = this._cropStartFrame;
+      const cropEnd = this._cropEndFrame >= 0 ? this._cropEndFrame : numFrames - 1;
+      const rangeSize = Math.max(1, cropEnd - cropStart + 1);
+      const relativeOffset = Math.max(0, offsetFrameIndex - cropStart);
+      const expectedFrame = cropStart +
+        (Math.floor(diff / timePerFrame) + relativeOffset) % rangeSize;
 
       if (this._frameIndex !== expectedFrame && !this._isDrawing) {
         // Update to the next expected frame
@@ -397,11 +425,17 @@ export default class VideoWorkerContext {
 
     const form = new CanvasForm(ctx);
 
+    // Only encode frames within crop range
+    const cropStart = this._cropStartFrame;
+    const cropEnd = this._cropEndFrame >= 0
+      ? this._cropEndFrame
+      : decodedVideo.frames.length - 1;
+    const cropFrameCount = cropEnd - cropStart + 1;
     const file = await encodeVideo(
       this.width,
       this.height,
-      decodedVideo.frames.length,
-      this._framesGenerator(decodedVideo, canvas, form),
+      cropFrameCount,
+      this._framesGenerator(decodedVideo, canvas, form, cropStart, cropEnd),
       progress => {
         this.sendResponse<EncodingStateUpdateResponse>('encodingStateUpdate', {
           progress,
@@ -421,23 +455,24 @@ export default class VideoWorkerContext {
     decodedVideo: DecodedVideo,
     canvas: OffscreenCanvas,
     form: CanvasForm,
+    startFrame: number = 0,
+    endFrame: number = -1,
   ): AsyncGenerator<ImageFrame, undefined> {
     const frames = decodedVideo.frames;
-
-    for (let frameIndex = 0; frameIndex < frames.length; ++frameIndex) {
+    const end = endFrame >= 0 ? endFrame : frames.length - 1;
+    const firstFrame = frames[startFrame];
+    const baseTimestamp = firstFrame?.bitmap.timestamp ?? 0;
+    for (let frameIndex = startFrame; frameIndex <= end && frameIndex < frames.length; ++frameIndex) {
       await this._drawFrameImpl(form, frameIndex, true);
-
       const frame = frames[frameIndex];
       const videoFrame = new VideoFrame(canvas, {
-        timestamp: frame.bitmap.timestamp,
+        timestamp: frame.bitmap.timestamp - baseTimestamp,
       });
-
       yield {
         bitmap: videoFrame,
-        timestamp: frame.timestamp,
+        timestamp: frame.timestamp - baseTimestamp,
         duration: frame.duration,
       };
-
       videoFrame.close();
     }
   }

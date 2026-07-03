@@ -132,6 +132,11 @@ self.addEventListener(
           await tracker?.streamMasks(frameIndex, endFrameIndex);
           break;
         }
+        case 'setCropRange': {
+          const {startFrame, endFrame} = event.data as {startFrame: number; endFrame: number};
+          context.setCropRange(startFrame, endFrame);
+          break;
+        }
         case 'abortStreamMasks':
           tracker?.abortStreamMasks();
           break;

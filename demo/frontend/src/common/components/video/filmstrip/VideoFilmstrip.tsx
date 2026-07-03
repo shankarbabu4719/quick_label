@@ -326,6 +326,8 @@ export default function VideoFilmstrip() {
               const endFrame   = Math.round(e * (total - 1));
               // Write to global atom so propagation + export can read it
               setCropRange({startFrame, endFrame});
+              // Apply crop range to video playback (loop within crop only)
+              video.setCropRange(startFrame, endFrame);
               // Seek video to crop start
               video.frame = startFrame;
               selectedFrameHelper.select(startFrame);

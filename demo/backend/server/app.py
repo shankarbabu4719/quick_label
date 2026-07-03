@@ -274,10 +274,17 @@ def trim_video(session_id: str) -> Response:
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
             tmp_path = tmp.name
 
-        cmd = [ffmpeg, "-y", "-i", video_path, "-ss", str(start_sec)]
+        cmd = [ffmpeg, "-y", "-ss", str(start_sec)]
         if duration_sec is not None:
             cmd += ["-t", str(duration_sec)]
-        cmd += ["-c", "copy", tmp_path]
+        cmd += [
+            "-i", video_path,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-c:a", "aac",
+            "-movflags", "+faststart",
+            "-avoid_negative_ts", "make_zero",
+            tmp_path
+        ]
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -391,6 +398,13 @@ def list_drafts() -> Response:
                 # Build a thumbnail URL from the video path
                 video_path = draft.get("video_path", "")
                 thumbnail_url = None
+
+                # Skip drafts whose video no longer exists
+                if video_path and not (DATA_PATH / video_path).exists():
+                    logger.info(f"Removing stale draft {draft_file.name} (video missing)")
+                    draft_file.unlink()
+                    continue
+
                 if video_path:
                     # For gallery videos use their poster; for uploads use the video itself
                     if video_path.startswith("gallery/"):
@@ -442,6 +456,7 @@ def load_draft(draft_id: str) -> Response:
     """
     Load a saved draft — returns the full draft JSON including masks.
     Frontend uses this to restore session state.
+    Also validates that the video file still exists.
     """
     import json
 
@@ -452,6 +467,15 @@ def load_draft(draft_id: str) -> Response:
 
         with open(draft_file, "r", encoding="utf-8") as f:
             draft = json.load(f)
+
+        # Validate video file still exists
+        video_path = draft.get("video_path", "")
+        full_video_path = DATA_PATH / video_path if video_path else None
+        if full_video_path and not full_video_path.exists():
+            # Video was deleted/trimmed — remove stale draft
+            draft_file.unlink()
+            logger.warning(f"Deleted stale draft {draft_id} (video missing: {video_path})")
+            return make_response({"error": "Draft video no longer exists"}, 404)
 
         return make_response(json.dumps(draft), 200)
 
