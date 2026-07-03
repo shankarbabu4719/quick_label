@@ -377,11 +377,46 @@ def extract_frames(session_id: str) -> Response:
                 logger.error(f"ffmpeg extract failed: {result.stderr}")
                 return make_response({"error": "Failed to extract frames"}, 500)
 
-            # Package frames into ZIP
+            # Package frames into ZIP + per-frame JSON from tracking data
             zip_path = os.path.join(tmpdir, "frames.zip")
+
+            # Load tracking JSON if available
+            tracking_data = {}
+            tracking_json_path = export_folder / "tracking.json"
+            if tracking_json_path.exists():
+                try:
+                    with open(tracking_json_path, "r", encoding="utf-8") as tf:
+                        td = json.load(tf)
+                    # Build a map: frame_index → masks data
+                    for frame in td.get("frames", []):
+                        tracking_data[frame["frame_index"]] = {
+                            "frame_index": frame["frame_index"],
+                            "objects": td.get("objects", []),
+                            "masks": frame.get("masks", []),
+                        }
+                except Exception as e:
+                    logger.warning(f"Could not load tracking.json: {e}")
+
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for fname in sorted(os.listdir(frames_dir)):
+                frame_files = sorted(os.listdir(frames_dir))
+                for i, fname in enumerate(frame_files):
+                    # Add image frame
                     zf.write(os.path.join(frames_dir, fname), fname)
+
+                    # Add per-frame JSON
+                    # Map extracted frame index back to source frame index
+                    # frame i at fps X corresponds to source frame ~ i * (source_fps / fps)
+                    source_frame_idx = int(round(
+                        (start_frame or 0) + i * (source_fps / fps)
+                    ))
+                    json_fname = os.path.splitext(fname)[0] + ".json"
+                    frame_json = tracking_data.get(source_frame_idx, {
+                        "frame_index": source_frame_idx,
+                        "objects": [],
+                        "masks": [],
+                        "note": "No mask data for this frame",
+                    })
+                    zf.writestr(json_fname, json.dumps(frame_json, indent=2))
 
             with open(zip_path, "rb") as f:
                 zip_data = f.read()
