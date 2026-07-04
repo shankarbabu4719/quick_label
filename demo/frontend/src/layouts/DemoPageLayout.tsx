@@ -26,9 +26,9 @@ const styles = stylex.create({
     display: 'flex',
     justifyContent: 'stretch',
     alignItems: 'stretch',
-    gap: spacing[12],
-    paddingHorizontal: spacing[12],
-    paddingVertical: spacing[4],
+    gap: spacing[6],
+    paddingHorizontal: spacing[6],
+    paddingVertical: spacing[3],
     '@media screen and (max-width: 768px)': {
       display: 'flex',
       flexDirection: 'column-reverse',
