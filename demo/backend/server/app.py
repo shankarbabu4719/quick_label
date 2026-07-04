@@ -295,18 +295,30 @@ def trim_video(session_id: str) -> Response:
         body = request.get_json(force=True) or {}
         start_frame = body.get("start_frame", 0)
         end_frame = body.get("end_frame", None)
-        fps = body.get("fps", 30.0)
-
         # Get video path from session
         session = inference_api._InferenceAPI__get_session(session_id)
         video_path = session.get("video_path", "")
-
         if not video_path or not os.path.isfile(video_path):
             return make_response({"error": "Video file not found"}, 404)
-
-        # Convert frames to timestamps
-        start_sec = start_frame / fps
-        duration_sec = ((end_frame - start_frame) / fps) if end_frame is not None else None
+        # Auto-detect actual video FPS using ffprobe
+        ffprobe_bin = shutil.which("ffprobe")
+        actual_fps = body.get("fps", 30.0)
+        if ffprobe_bin:
+            try:
+                probe = subprocess.run(
+                    [ffprobe_bin, "-v", "quiet", "-show_entries",
+                     "stream=r_frame_rate", "-select_streams", "v:0",
+                     "-of", "json", video_path],
+                    capture_output=True, text=True
+                )
+                probe_data = json.loads(probe.stdout)
+                fps_str = probe_data.get("streams", [{}])[0].get("r_frame_rate", "30/1")
+                num, den = fps_str.split("/")
+                actual_fps = float(num) / float(den)
+            except Exception:
+                pass
+        start_sec = start_frame / actual_fps
+        duration_sec = ((end_frame - start_frame) / actual_fps) if end_frame is not None else None
 
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
