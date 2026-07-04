@@ -61,16 +61,13 @@ const styles = stylex.create({
   container: {
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'auto',
+    overflow: 'hidden',
     width: '100%',
-    borderColor: color['gray-800'],
-    backgroundColor: color['gray-800'],
-    borderWidth: 8,
-    borderRadius: 12,
+    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#0F1117',
+    borderWidth: 1,
+    borderRadius: 14,
     '@media screen and (max-width: 768px)': {
-      // on mobile, we want to grow the editor container so that the editor
-      // fills the remaining vertical space between the navbar and bottom
-      // of the page
       flexGrow: 1,
       borderWidth: 0,
       borderRadius: 0,
@@ -83,7 +80,7 @@ const styles = stylex.create({
     left: 0,
     width: '100%',
     height: '100%',
-    background: 'white',
+    background: '#0F1117',
     overflow: 'hidden',
     overflowY: 'auto',
     zIndex: 999,
