@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import GradientBorder from '@/common/components/button/GradientBorder';
 import type {ReactNode} from 'react';
+import {useState} from 'react';
 
 type Props = {
   disabled?: boolean;
@@ -27,14 +27,39 @@ export default function PrimaryCTAButton({
   endIcon,
   ...props
 }: Props) {
+  const [hovered, setHovered] = useState(false);
+
   return (
-    <GradientBorder disabled={disabled}>
-      <button
-        className={`btn ${disabled && 'btn-disabled'} !rounded-full !bg-black !text-white !border-none`}
-        {...props}>
-        {children}
-        {endIcon != null && endIcon}
-      </button>
-    </GradientBorder>
+    <button
+      {...props}
+      disabled={disabled}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '10px 20px',
+        fontSize: 14,
+        fontWeight: 600,
+        letterSpacing: '-0.1px',
+        borderRadius: 10,
+        border: 'none',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
+        transition: 'all 0.18s',
+        background: hovered && !disabled
+          ? 'linear-gradient(135deg, #7c7ff5, #9b5cf8)'
+          : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+        color: '#fff',
+        boxShadow: hovered && !disabled
+          ? '0 4px 16px rgba(99,102,241,0.55)'
+          : '0 2px 8px rgba(99,102,241,0.3)',
+        transform: hovered && !disabled ? 'translateY(-1px)' : 'none',
+        whiteSpace: 'nowrap',
+      }}>
+      {children}
+      {endIcon != null && endIcon}
+    </button>
   );
 }

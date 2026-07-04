@@ -13,26 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {spacing} from '@/theme/tokens.stylex';
-import stylex from '@stylexjs/stylex';
 import {PropsWithChildren} from 'react';
 
-const styles = stylex.create({
-  container: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: {
-      default: spacing[2],
-      '@media screen and (max-width: 768px)': spacing[4],
-    },
-    paddingBottom: spacing[6],
-    paddingHorizontal: spacing[6],
-  },
-});
-
-export default function ToolbarBottomActionsWrapper({
-  children,
-}: PropsWithChildren) {
-  return <div {...stylex.props(styles.container)}>{children}</div>;
+export default function ToolbarBottomActionsWrapper({children}: PropsWithChildren) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      padding: '14px 20px 20px',
+      borderTop: '1px solid rgba(255,255,255,0.06)',
+      background: 'rgba(0,0,0,0.2)',
+    }}>
+      {children}
+    </div>
+  );
 }

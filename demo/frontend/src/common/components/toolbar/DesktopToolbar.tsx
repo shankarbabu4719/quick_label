@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import ObjectsToolbar from '@/common/components/annotations/ObjectsToolbar';
-import EffectsToolbar from '@/common/components/effects/EffectsToolbar';
 import MoreOptionsToolbar from '@/common/components/options/MoreOptionsToolbar';
 import type {CSSProperties} from 'react';
 
@@ -24,11 +23,6 @@ type Props = {
 };
 
 export default function DesktopToolbar({tabIndex, onTabChange}: Props) {
-  const toolbarShadow: CSSProperties = {
-    boxShadow: '0px 1px 3px 1px rgba(0,0,0,.25)',
-    transition: 'box-shadow 0.8s ease-out',
-  };
-
   const tabs = [
     <ObjectsToolbar key="objects" onTabChange={onTabChange} />,
     // Effects tab removed — not needed
@@ -38,8 +32,13 @@ export default function DesktopToolbar({tabIndex, onTabChange}: Props) {
 
   return (
     <div
-      style={toolbarShadow}
-      className="bg-graydark-800 text-white md:basis-[350px] lg:basis-[435px] shrink-0 rounded-xl">
+      style={{
+        background: '#13151C',
+        border: '1px solid rgba(255,255,255,0.07)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+        transition: 'box-shadow 0.3s ease',
+      }}
+      className="text-white md:basis-[350px] lg:basis-[420px] shrink-0 rounded-xl overflow-hidden">
       {tabs[tabIndex]}
     </div>
   );

@@ -67,7 +67,10 @@ export default function RootLayout() {
           <Outlet />
         </Suspense>
       </div>
-      <div {...stylex.props(styles.debugActions)}>
+      {/* Settings cog — subtle, top right */}
+      <div style={{
+        position: 'fixed', top: 12, right: 12, zIndex: 100,
+      }}>
         <Indicator>
           {hasChanged && (
             <Indicator.Item
@@ -81,8 +84,13 @@ export default function RootLayout() {
             onClick={openModal}
             shape="circle"
             size="xs"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'rgba(255,255,255,0.5)',
+            }}
             startIcon={<Cog6ToothIcon className="w-4 h-4" />}
-            title="Bugnub"
+            title="Settings"
           />
         </Indicator>
       </div>

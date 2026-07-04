@@ -21,6 +21,27 @@ import {useSetAtom} from 'jotai';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 
+// ── Design tokens ─────────────────────────────────────────────────
+const C = {
+  bg:        '#0B0D12',
+  surface:   '#13151C',
+  surfaceHi: '#1C1F2A',
+  border:    'rgba(255,255,255,0.07)',
+  borderHi:  'rgba(255,255,255,0.14)',
+  text:      '#F0F2F7',
+  textMuted: 'rgba(240,242,247,0.45)',
+  textDim:   'rgba(240,242,247,0.25)',
+  indigo:    '#6366F1',
+  indigoLo:  'rgba(99,102,241,0.12)',
+  green:     '#22C55E',
+  greenLo:   'rgba(34,197,94,0.12)',
+  amber:     '#F59E0B',
+  amberLo:   'rgba(245,158,11,0.12)',
+  red:       '#EF4444',
+  redLo:     'rgba(239,68,68,0.12)',
+};
+
+// ── Types ─────────────────────────────────────────────────────────
 type ExportProject = {
   name: string;
   hasJson: boolean;
@@ -40,428 +61,406 @@ type DraftProject = {
 };
 
 function formatTimestamp(ts: number): string {
-  const date = new Date(ts);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-  if (diffMins < 1) return 'just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
+  const diffMs = Date.now() - ts;
+  const m = Math.floor(diffMs / 60000);
+  const h = Math.floor(diffMs / 3600000);
+  const d = Math.floor(diffMs / 86400000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  if (h < 24) return `${h}h ago`;
+  if (d < 7) return `${d}d ago`;
+  return new Date(ts).toLocaleDateString();
 }
 
+function videoName(path: string): string {
+  return path.split('/').pop()?.replace('.mp4', '').replace(/_/g, ' ') || 'Untitled';
+}
+
+// ── Thumbnail ─────────────────────────────────────────────────────
 function VideoThumbnail({src}: {src: string | null}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  if (!src) {
-    return (
-      <div style={{
-        width: '100%', height: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'rgba(255,255,255,0.05)',
-        color: 'rgba(255,255,255,0.3)',
-        fontSize: 13,
-      }}>
-        No preview
-      </div>
-    );
-  }
-
-  // Use video thumbnail by seeking to first frame
+  if (!src) return (
+    <div style={{
+      width: '100%', height: '100%',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: C.surfaceHi, gap: 8,
+    }}>
+      <span style={{fontSize: 24, opacity: 0.3}}>🎬</span>
+      <span style={{fontSize: 11, color: C.textDim}}>No preview</span>
+    </div>
+  );
   return (
     <video
-      ref={videoRef}
       src={src}
       style={{width: '100%', height: '100%', objectFit: 'cover'}}
-      muted
-      preload="metadata"
-      onLoadedMetadata={e => {
-        (e.target as HTMLVideoElement).currentTime = 0.1;
-      }}
+      muted preload="metadata"
+      onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.1; }}
     />
   );
 }
 
+// ── Main Page ─────────────────────────────────────────────────────
 export default function ProjectHubPage() {
   const [projects, setProjects] = useState<ExportProject[]>([]);
-  const [drafts, setDrafts] = useState<DraftProject[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isDragging, setIsDragging] = useState(false);
+  const [drafts, setDrafts]     = useState<DraftProject[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [dragging, setDragging] = useState(false);
   const navigate = useNavigate();
   const setUploadingState = useSetAtom(uploadingStateAtom);
-  const setSession = useSetAtom(sessionAtom);
+  const setSession        = useSetAtom(sessionAtom);
 
   const {getRootProps, getInputProps, isUploading, error} = useUploadVideo({
-    onUpload: videoData => {
-      navigate('/demo', {state: {video: videoData}});
-      setUploadingState('default');
-      setSession(null);
-    },
-    onUploadError: (err: Error) => {
-      setUploadingState('error');
-      Logger.error(err);
-    },
+    onUpload: v => { navigate('/demo', {state: {video: v}}); setUploadingState('default'); setSession(null); },
+    onUploadError: e => { setUploadingState('error'); Logger.error(e); },
     onUploadStart: () => setUploadingState('uploading'),
   });
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
+  useEffect(() => { fetchAll(); }, []);
 
   async function fetchAll() {
     setLoading(true);
     try {
-      const [exportsRes, draftsRes] = await Promise.all([
+      const [er, dr] = await Promise.all([
         fetch('http://localhost:7263/list_exports'),
         fetch('http://localhost:7263/list_drafts'),
       ]);
-      const exportsData = await exportsRes.json();
-      const draftsData = await draftsRes.json();
-      setProjects(exportsData.exports || []);
-      setDrafts(draftsData.drafts || []);
-    } catch (e) {
-      Logger.error('Failed to fetch data:', e);
-    } finally {
-      setLoading(false);
-    }
+      const ed = await er.json(); const dd = await dr.json();
+      setProjects(ed.exports || []); setDrafts(dd.drafts || []);
+    } catch(e) { Logger.error(e); } finally { setLoading(false); }
   }
 
   const fetchDrafts = useCallback(async () => {
-    try {
-      const res = await fetch('http://localhost:7263/list_drafts');
-      const data = await res.json();
-      setDrafts(data.drafts || []);
-    } catch (e) {
-      Logger.error(e);
-    }
+    try { const r = await fetch('http://localhost:7263/list_drafts'); const d = await r.json(); setDrafts(d.drafts || []); } catch(e) { Logger.error(e); }
   }, []);
 
-  function handleDownloadJSON(projectName: string) {
-    const link = document.createElement('a');
-    link.href = `http://localhost:7263/exports/${projectName}/tracking.json`;
-    link.download = 'tracking.json';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  function handleDownloadJSON(name: string) {
+    const a = document.createElement('a');
+    a.href = `http://localhost:7263/exports/${name}/tracking.json`;
+    a.download = 'tracking.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }
 
   async function handleResumeDraft(draft: DraftProject) {
-    try {
-      const res = await fetch(`http://localhost:7263/load_draft/${draft.draft_id}`);
-      const draftData = await res.json();
-      navigate('/demo', {state: {draft: draftData}});
-    } catch (e) {
-      Logger.error('Failed to load draft:', e);
-    }
+    try { const r = await fetch(`http://localhost:7263/load_draft/${draft.draft_id}`); const d = await r.json(); navigate('/demo', {state: {draft: d}}); } catch(e) { Logger.error(e); }
   }
 
-  async function handleDeleteDraft(draftId: string, e: React.MouseEvent) {
+  async function handleDeleteDraft(id: string, e: React.MouseEvent) {
     e.stopPropagation();
     if (!confirm('Delete this draft?')) return;
-    try {
-      await fetch(`http://localhost:7263/delete_draft/${draftId}`, {method: 'DELETE'});
-      fetchDrafts();
-    } catch (err) {
-      Logger.error(err);
-    }
+    try { await fetch(`http://localhost:7263/delete_draft/${id}`, {method: 'DELETE'}); fetchDrafts(); } catch(e) { Logger.error(e); }
   }
 
-  // Derive a clean display name from video path
-  function videoName(path: string): string {
-    return path.split('/').pop()?.replace('.mp4', '').replace(/_/g, ' ') || 'Untitled';
-  }
-
-  // Thumbnail URL for draft — prefer video itself for uploads, poster for gallery
-  function draftThumbnail(draft: DraftProject): string | null {
-    const path = draft.video_path;
-    if (!path) return null;
-    if (path.startsWith('uploads/')) return `http://localhost:7263/${path}`;
-    if (path.startsWith('gallery/')) {
-      const stem = path.replace('gallery/', '').replace('.mp4', '');
-      return `http://localhost:7263/posters/${stem}.jpg`;
-    }
-    return draft.thumbnail_url;
+  function draftThumb(d: DraftProject): string | null {
+    const p = d.video_path;
+    if (!p) return null;
+    if (p.startsWith('uploads/')) return `http://localhost:7263/${p}`;
+    if (p.startsWith('gallery/')) return `http://localhost:7263/posters/${p.replace('gallery/','').replace('.mp4','.jpg')}`;
+    return d.thumbnail_url;
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: '#0F1117',
-      color: '#fff',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-    }}>
-      {/* ── Header ── */}
-      <div style={{
-        borderBottom: '1px solid rgba(255,255,255,0.08)',
-        padding: '20px 40px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
+    <div style={{minHeight:'100vh', background:C.bg, color:C.text, fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+
+      {/* ── Nav ── */}
+      <nav style={{
+        position:'sticky', top:0, zIndex:50,
+        borderBottom:`1px solid ${C.border}`,
+        background:'rgba(11,13,18,0.85)',
+        backdropFilter:'blur(12px)',
+        padding:'0 40px',
+        display:'flex', alignItems:'center', justifyContent:'space-between',
+        height: 60,
       }}>
-        <div style={{display: 'flex', alignItems: 'center', gap: 12}}>
+        <div style={{display:'flex', alignItems:'center', gap:10}}>
           <div style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 16,
+            width:34, height:34, borderRadius:10,
+            background:'linear-gradient(135deg,#6366f1,#8b5cf6)',
+            display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:18, boxShadow:'0 0 16px rgba(99,102,241,0.4)',
           }}>⬡</div>
-          <span style={{fontWeight: 700, fontSize: 18, letterSpacing: '-0.3px'}}>SAM2 Tracker</span>
+          <div>
+            <div style={{fontWeight:700, fontSize:16, letterSpacing:'-0.3px', lineHeight:1.1}}>SAM2 Tracker</div>
+            <div style={{fontSize:10, color:C.textDim, letterSpacing:'0.06em', textTransform:'uppercase'}}>AI Object Tracking</div>
+          </div>
         </div>
-        <span style={{fontSize: 13, color: 'rgba(255,255,255,0.4)'}}>
-          Powered by Segment Anything Model 2
-        </span>
-      </div>
+        <div style={{
+          display:'flex', alignItems:'center', gap:8,
+          fontSize:12, color:C.textDim,
+          background:C.surface, border:`1px solid ${C.border}`,
+          padding:'6px 14px', borderRadius:20,
+        }}>
+          <span style={{width:6,height:6,borderRadius:'50%',background:C.green,boxShadow:`0 0 6px ${C.green}`,display:'inline-block'}} />
+          Running locally
+        </div>
+      </nav>
 
-      <div style={{maxWidth: 1100, margin: '0 auto', padding: '48px 32px'}}>
+      <div style={{maxWidth:1120, margin:'0 auto', padding:'0 32px 80px'}}>
 
-        {/* ── Hero Upload ── */}
-        <div style={{marginBottom: 64}}>
-          <h1 style={{
-            fontSize: 40, fontWeight: 700, marginBottom: 8,
-            letterSpacing: '-0.5px', lineHeight: 1.2,
-          }}>
-            Track anything in video
-          </h1>
-          <p style={{fontSize: 16, color: 'rgba(255,255,255,0.5)', marginBottom: 32}}>
-            Upload a video, click objects to track them, and export results.
-          </p>
+        {/* ── Hero ── */}
+        <div style={{padding:'64px 0 56px', position:'relative'}}>
+          {/* Background glow */}
+          <div style={{
+            position:'absolute', top:0, left:'50%', transform:'translateX(-50%)',
+            width:600, height:300, borderRadius:'50%',
+            background:'radial-gradient(ellipse,rgba(99,102,241,0.12) 0%,transparent 70%)',
+            pointerEvents:'none',
+          }} />
 
+          <div style={{position:'relative', textAlign:'center', marginBottom:48}}>
+            <div style={{
+              display:'inline-flex', alignItems:'center', gap:8,
+              background:C.indigoLo, border:`1px solid rgba(99,102,241,0.25)`,
+              borderRadius:20, padding:'5px 16px',
+              fontSize:12, fontWeight:600, color:'#a5b4fc',
+              letterSpacing:'0.05em', marginBottom:20,
+            }}>
+              ✦ Powered by Meta SAM 2
+            </div>
+            <h1 style={{
+              fontSize:52, fontWeight:800, margin:'0 0 16px',
+              letterSpacing:'-1px', lineHeight:1.1,
+              background:'linear-gradient(135deg, #fff 30%, rgba(255,255,255,0.55))',
+              WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
+              backgroundClip:'text',
+            }}>
+              Track anything<br />in your videos
+            </h1>
+            <p style={{fontSize:17, color:C.textMuted, margin:0, maxWidth:480, marginInline:'auto', lineHeight:1.6}}>
+              Upload a video, click objects to annotate, and export precise tracking data with masks and JSON.
+            </p>
+          </div>
+
+          {/* Feature pills */}
+          <div style={{display:'flex', justifyContent:'center', gap:10, marginBottom:40, flexWrap:'wrap'}}>
+            {[
+              {icon:'⚡', label:'AI-powered masking'},
+              {icon:'✂️', label:'Timeline crop'},
+              {icon:'📦', label:'JSON + Video export'},
+              {icon:'🖼', label:'Frame extraction'},
+            ].map(f => (
+              <div key={f.label} style={{
+                display:'flex', alignItems:'center', gap:7,
+                background:C.surface, border:`1px solid ${C.border}`,
+                borderRadius:20, padding:'7px 14px',
+                fontSize:13, color:C.textMuted,
+              }}>
+                <span>{f.icon}</span> {f.label}
+              </div>
+            ))}
+          </div>
+
+          {/* Upload zone */}
           <div
             {...getRootProps()}
-            onDragEnter={() => setIsDragging(true)}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={() => setIsDragging(false)}
+            onDragEnter={() => setDragging(true)}
+            onDragLeave={() => setDragging(false)}
+            onDrop={() => setDragging(false)}
             style={{
-              border: `2px dashed ${isDragging ? '#6366f1' : 'rgba(255,255,255,0.15)'}`,
-              borderRadius: 16,
-              padding: '52px 32px',
-              textAlign: 'center',
-              background: isDragging ? 'rgba(99,102,241,0.08)' : 'rgba(255,255,255,0.03)',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
+              border:`2px dashed ${dragging ? C.indigo : C.borderHi}`,
+              borderRadius:20,
+              padding:'56px 32px',
+              textAlign:'center',
+              background: dragging ? C.indigoLo : C.surface,
+              cursor:'pointer',
+              transition:'all 0.2s',
+              boxShadow: dragging ? `0 0 0 4px rgba(99,102,241,0.15)` : 'none',
             }}>
             <input {...getInputProps()} />
-            <div style={{fontSize: 40, marginBottom: 16}}>
-              {isUploading ? '⏳' : '↑'}
+            <div style={{
+              width:56, height:56, borderRadius:16,
+              background: isUploading ? C.amberLo : C.indigoLo,
+              border:`1px solid ${isUploading ? 'rgba(245,158,11,0.3)' : 'rgba(99,102,241,0.3)'}`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:24, margin:'0 auto 20px',
+            }}>
+              {isUploading ? '⏳' : error ? '⚠️' : '↑'}
             </div>
-            <div style={{fontSize: 18, fontWeight: 600, marginBottom: 8}}>
-              {isUploading
-                ? 'Uploading...'
-                : error
-                  ? `Error: ${error}`
-                  : 'Drop a video here, or click to upload'}
+            <div style={{fontSize:18, fontWeight:700, marginBottom:8, color:C.text}}>
+              {isUploading ? 'Uploading your video...' : error ? `Upload failed: ${error}` : 'Drop your video here'}
             </div>
-            <div style={{fontSize: 14, color: 'rgba(255,255,255,0.4)'}}>
-              Max {MAX_UPLOAD_FILE_SIZE} · MP4 or MOV · up to 2 minutes
+            <div style={{fontSize:13, color:C.textDim}}>
+              or <span style={{color:C.indigo, fontWeight:600}}>click to browse</span> · {MAX_UPLOAD_FILE_SIZE} max · MP4 / MOV · up to 2 min
             </div>
           </div>
         </div>
 
         {/* ── Previous Projects ── */}
-        <Section
-          title="Previous Projects"
-          count={projects.length}
-          icon="✓"
-          iconColor="#22c55e"
-          empty={!loading && projects.length === 0}
-          emptyText="Completed projects will appear here."
-          loading={loading}>
-          {projects.map(p => (
-            <ProjectCard
-              key={p.name}
-              thumbnail={p.thumbnailUrl ? `http://localhost:7263/${p.thumbnailUrl}` : null}
-              name={p.name.slice(0, 16) + '...'}
-              badge="Complete"
-              badgeColor="#22c55e"
-              actions={
-                p.hasJson
-                  ? [{label: 'Download JSON', icon: '↓', onClick: () => handleDownloadJSON(p.name)}]
-                  : []
-              }
-            />
-          ))}
-        </Section>
+        <SectionHeader title="Completed Projects" count={projects.length} accentColor={C.green} icon="✓" />
+        {loading ? (
+          <LoadingGrid />
+        ) : projects.length === 0 ? (
+          <EmptyState text="No completed projects yet. Finish a project to see it here." />
+        ) : (
+          <CardGrid>
+            {projects.map(p => (
+              <Card
+                key={p.name}
+                thumb={p.thumbnailUrl ? `http://localhost:7263/${p.thumbnailUrl}` : null}
+                name={p.name.slice(0, 20) + (p.name.length > 20 ? '...' : '')}
+                badge="Complete" badgeColor={C.green}
+                actions={p.hasJson ? [{label:'Download JSON', icon:'↓', color:C.indigo, onClick:() => handleDownloadJSON(p.name)}] : []}
+              />
+            ))}
+          </CardGrid>
+        )}
+
+        <div style={{height:48}} />
 
         {/* ── Drafts ── */}
-        <Section
-          title="Draft Projects"
-          count={drafts.length}
-          icon="⏸"
-          iconColor="#f59e0b"
-          empty={drafts.length === 0}
-          emptyText="Start a project and leave mid-way — it will appear here."
-          loading={false}>
-          {drafts.map(draft => (
-            <ProjectCard
-              key={draft.draft_id}
-              thumbnail={draftThumbnail(draft)}
-              name={videoName(draft.video_path)}
-              badge="Draft"
-              badgeColor="#f59e0b"
-              meta={`${draft.objects.length} obj · ${draft.mask_frame_count} frames · ${formatTimestamp(draft.saved_at)}`}
-              actions={[
-                {label: 'Resume', icon: '▶', onClick: () => handleResumeDraft(draft), primary: true},
-                {label: 'Delete', icon: '✕', onClick: (e) => handleDeleteDraft(draft.draft_id, e), danger: true},
-              ]}
-            />
-          ))}
-        </Section>
-
+        <SectionHeader title="Draft Projects" count={drafts.length} accentColor={C.amber} icon="⏸" />
+        {drafts.length === 0 ? (
+          <EmptyState text="Start a project and leave mid-way — it will auto-save here." />
+        ) : (
+          <CardGrid>
+            {drafts.map(d => (
+              <Card
+                key={d.draft_id}
+                thumb={draftThumb(d)}
+                name={videoName(d.video_path)}
+                badge="Draft" badgeColor={C.amber}
+                meta={`${d.objects.length} obj · ${d.mask_frame_count} frames · ${formatTimestamp(d.saved_at)}`}
+                actions={[
+                  {label:'Resume', icon:'▶', color:C.indigo, primary:true, onClick:() => handleResumeDraft(d)},
+                  {label:'Delete', icon:'✕', color:C.red, danger:true, onClick:(e) => handleDeleteDraft(d.draft_id, e)},
+                ]}
+              />
+            ))}
+          </CardGrid>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Reusable Section ──────────────────────────────────────────────
-function Section({title, count, icon, iconColor, empty, emptyText, loading, children}: {
-  title: string;
-  count: number;
-  icon: string;
-  iconColor: string;
-  empty: boolean;
-  emptyText: string;
-  loading: boolean;
-  children?: React.ReactNode;
-}) {
+// ── Sub-components ─────────────────────────────────────────────────
+
+function SectionHeader({title, count, accentColor, icon}: {title:string; count:number; accentColor:string; icon:string}) {
   return (
-    <div style={{marginBottom: 56}}>
+    <div style={{display:'flex', alignItems:'center', gap:12, marginBottom:20}}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        marginBottom: 20,
-      }}>
-        <span style={{
-          width: 28, height: 28, borderRadius: 8,
-          background: `${iconColor}22`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 14, color: iconColor,
-        }}>{icon}</span>
-        <h2 style={{fontSize: 18, fontWeight: 600, margin: 0}}>{title}</h2>
-        <span style={{
-          fontSize: 12, fontWeight: 600,
-          background: 'rgba(255,255,255,0.1)',
-          padding: '2px 8px', borderRadius: 20,
-          color: 'rgba(255,255,255,0.6)',
-        }}>{count}</span>
-      </div>
-
-      {loading ? (
-        <div style={{color: 'rgba(255,255,255,0.3)', fontSize: 14, padding: '24px 0'}}>Loading...</div>
-      ) : empty ? (
-        <div style={{
-          padding: '32px 24px',
-          background: 'rgba(255,255,255,0.03)',
-          border: '1px dashed rgba(255,255,255,0.1)',
-          borderRadius: 12,
-          textAlign: 'center',
-          fontSize: 14,
-          color: 'rgba(255,255,255,0.3)',
-        }}>{emptyText}</div>
-      ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-          gap: 16,
-        }}>
-          {children}
-        </div>
-      )}
+        width:32, height:32, borderRadius:9,
+        background:`${accentColor}18`,
+        border:`1px solid ${accentColor}33`,
+        display:'flex', alignItems:'center', justifyContent:'center',
+        fontSize:14, color:accentColor,
+      }}>{icon}</div>
+      <h2 style={{fontSize:18, fontWeight:700, margin:0, letterSpacing:'-0.2px'}}>{title}</h2>
+      <span style={{
+        fontSize:12, fontWeight:700,
+        background:'rgba(255,255,255,0.08)',
+        color:C.textMuted,
+        padding:'2px 10px', borderRadius:20,
+      }}>{count}</span>
     </div>
   );
 }
 
-// ── Reusable Project Card ─────────────────────────────────────────
-type Action = {
-  label: string;
-  icon: string;
+function CardGrid({children}: {children: React.ReactNode}) {
+  return (
+    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(230px,1fr))', gap:16}}>
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({text}: {text:string}) {
+  return (
+    <div style={{
+      padding:'36px 24px', textAlign:'center',
+      background:C.surface, border:`1px dashed ${C.border}`,
+      borderRadius:16, fontSize:14, color:C.textDim,
+    }}>{text}</div>
+  );
+}
+
+function LoadingGrid() {
+  return (
+    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(230px,1fr))', gap:16}}>
+      {[0,1,2].map(i => (
+        <div key={i} style={{
+          background:C.surface, border:`1px solid ${C.border}`,
+          borderRadius:16, overflow:'hidden',
+        }}>
+          <div style={{aspectRatio:'16/9', background:C.surfaceHi, animation:'pulse 1.5s infinite'}} />
+          <div style={{padding:'14px 16px'}}>
+            <div style={{height:14, width:'60%', background:C.surfaceHi, borderRadius:4, marginBottom:8}} />
+            <div style={{height:10, width:'40%', background:C.surfaceHi, borderRadius:4}} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type CardAction = {
+  label: string; icon: string; color: string;
+  primary?: boolean; danger?: boolean;
   onClick: (e: React.MouseEvent) => void;
-  primary?: boolean;
-  danger?: boolean;
 };
 
-function ProjectCard({thumbnail, name, badge, badgeColor, meta, actions = []}: {
-  thumbnail: string | null;
-  name: string;
-  badge: string;
-  badgeColor: string;
-  meta?: string;
-  actions?: Action[];
+function Card({thumb, name, badge, badgeColor, meta, actions=[]}: {
+  thumb: string|null; name: string; badge: string; badgeColor: string;
+  meta?: string; actions?: CardAction[];
 }) {
   const [hovered, setHovered] = useState(false);
-
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: hovered ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        borderRadius: 12,
-        overflow: 'hidden',
-        transition: 'all 0.2s',
-        transform: hovered ? 'translateY(-2px)' : 'none',
-        boxShadow: hovered ? '0 8px 24px rgba(0,0,0,0.4)' : 'none',
+        background: hovered ? C.surfaceHi : C.surface,
+        border:`1px solid ${hovered ? C.borderHi : C.border}`,
+        borderRadius:16, overflow:'hidden',
+        transition:'all 0.18s',
+        transform: hovered ? 'translateY(-3px)' : 'none',
+        boxShadow: hovered ? '0 12px 32px rgba(0,0,0,0.5)' : 'none',
+        cursor:'default',
       }}>
       {/* Thumbnail */}
-      <div style={{
-        width: '100%', aspectRatio: '16/9',
-        background: '#1a1c24',
-        position: 'relative', overflow: 'hidden',
-      }}>
-        <VideoThumbnail src={thumbnail} />
+      <div style={{width:'100%', aspectRatio:'16/9', background:C.surfaceHi, position:'relative', overflow:'hidden'}}>
+        <VideoThumbnail src={thumb} />
+        {/* Gradient overlay */}
+        <div style={{
+          position:'absolute', inset:0,
+          background:'linear-gradient(to top, rgba(0,0,0,0.5) 0%, transparent 50%)',
+          pointerEvents:'none',
+        }} />
         {/* Badge */}
         <span style={{
-          position: 'absolute', top: 8, right: 8,
-          fontSize: 11, fontWeight: 700,
-          background: `${badgeColor}22`,
-          color: badgeColor,
-          border: `1px solid ${badgeColor}44`,
-          padding: '3px 8px', borderRadius: 6,
+          position:'absolute', top:10, left:10,
+          fontSize:10, fontWeight:700,
+          background:`${badgeColor}22`, color:badgeColor,
+          border:`1px solid ${badgeColor}55`,
+          padding:'3px 9px', borderRadius:6, letterSpacing:'0.05em', textTransform:'uppercase',
         }}>{badge}</span>
       </div>
 
-      {/* Info */}
-      <div style={{padding: '12px 14px'}}>
+      {/* Content */}
+      <div style={{padding:'14px 16px'}}>
         <div style={{
-          fontSize: 14, fontWeight: 600,
-          marginBottom: meta ? 4 : 12,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          fontSize:14, fontWeight:600, color:C.text,
+          marginBottom: meta ? 4 : 14,
+          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
         }} title={name}>{name}</div>
 
         {meta && (
-          <div style={{
-            fontSize: 12, color: 'rgba(255,255,255,0.4)',
-            marginBottom: 12,
-          }}>{meta}</div>
+          <div style={{fontSize:11, color:C.textDim, marginBottom:12, letterSpacing:'0.02em'}}>{meta}</div>
         )}
 
-        {/* Actions */}
-        <div style={{display: 'flex', gap: 8}}>
-          {actions.map(action => (
-            <button
-              key={action.label}
-              onClick={action.onClick}
-              style={{
-                flex: action.primary ? 1 : undefined,
-                padding: '7px 14px',
-                fontSize: 13, fontWeight: 500,
-                border: 'none', borderRadius: 8,
-                cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 6,
-                transition: 'all 0.15s',
-                background: action.danger
-                  ? 'rgba(239,68,68,0.15)'
-                  : action.primary
-                    ? '#6366f1'
-                    : 'rgba(255,255,255,0.1)',
-                color: action.danger
-                  ? '#ef4444'
-                  : '#fff',
-              }}>
-              <span>{action.icon}</span>
-              {action.label}
+        <div style={{display:'flex', gap:8}}>
+          {actions.map(a => (
+            <button key={a.label} onClick={a.onClick} style={{
+              flex: a.primary ? 1 : undefined,
+              padding:'7px 12px', fontSize:12, fontWeight:600,
+              border:'none', borderRadius:8, cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+              transition:'all 0.15s',
+              background: a.danger ? C.redLo : a.primary ? C.indigo : C.indigoLo,
+              color: a.danger ? C.red : '#fff',
+              boxShadow: a.primary ? `0 2px 8px rgba(99,102,241,0.35)` : 'none',
+            }}>
+              <span style={{fontSize:10}}>{a.icon}</span>
+              {a.label}
             </button>
           ))}
         </div>
