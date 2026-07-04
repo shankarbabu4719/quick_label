@@ -1,67 +1,107 @@
 #!/bin/bash
 
-# Script to run both SAM 2 frontend and backend together
+# SAM2 Tracker — Start script
+# Works on macOS and Ubuntu/Linux
 
-# Function to handle cleanup (kill child processes on exit)
+# ── Cleanup on exit ─────────────────────────────────────────────
 cleanup() {
-  echo "Shutting down services..."
+  echo ""
+  echo "🛑 Shutting down services..."
+  pkill -f "python.*app.py" 2>/dev/null
+  pkill -f "vite.*7262"     2>/dev/null
   kill $BACKEND_PID $FRONTEND_PID 2>/dev/null
   exit
 }
-
-# Set up trap to handle Ctrl+C and exit
 trap cleanup SIGINT SIGTERM
 
-# Get the project root directory
-PROJECT_ROOT="$(dirname "$0")"
+# ── Project root ─────────────────────────────────────────────────
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
 
-echo "🚀 Starting SAM 2 Demo..."
+echo "🚀 Starting SAM2 Tracker..."
+echo "   Project: $PROJECT_ROOT"
 
-# Activate virtual environment
-echo "📦 Activating virtual environment..."
+# ── Kill any leftover processes ───────────────────────────────────
+pkill -f "python.*app.py" 2>/dev/null
+pkill -f "vite.*7262"     2>/dev/null
+sleep 1
+
+# ── Virtual environment ──────────────────────────────────────────
+if [ ! -d "venv" ]; then
+  echo "❌ venv not found. Run: python3 -m venv venv && source venv/bin/activate && pip install -e '.[demo]'"
+  exit 1
+fi
 source venv/bin/activate
+echo "📦 Virtual environment activated"
 
-# Check if checkpoints are downloaded
-if [ ! -d "checkpoints" ] || [ -z "$(ls -A checkpoints 2>/dev/null)" ]; then
-  echo "📥 Downloading checkpoints..."
-  (cd checkpoints && ./download_ckpts.sh)
+# ── Checkpoints ──────────────────────────────────────────────────
+CKPT_DIR="checkpoints"
+if [ ! -f "$CKPT_DIR/sam2.1_hiera_tiny.pt" ]; then
+  echo "📥 Downloading checkpoints (this may take a while)..."
+  (cd "$CKPT_DIR" && bash download_ckpts.sh)
 fi
 
-# Start backend in background with gunicorn, adding macOS fork safety env var
-  echo "🔧 Starting backend on http://localhost:7263 (CPU mode)..."
-  cd demo/backend/server
-  OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
-  PYTORCH_ENABLE_MPS_FALLBACK=1 \
+# ── Detect OS for backend env vars ───────────────────────────────
+OS="$(uname -s)"
+if [ "$OS" = "Darwin" ]; then
+  # macOS: disable fork safety + MPS fallback
+  EXTRA_ENV="OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES PYTORCH_ENABLE_MPS_FALLBACK=1"
+  echo "🍎 macOS detected"
+else
+  # Linux/Ubuntu: no macOS-specific flags needed
+  EXTRA_ENV=""
+  echo "🐧 Linux detected"
+fi
+
+# ── Start backend ────────────────────────────────────────────────
+echo "🔧 Starting backend on http://localhost:7263 (tiny model, CPU mode)..."
+cd demo/backend/server
+
+env $EXTRA_ENV \
   SAM2_DEMO_FORCE_CPU_DEVICE=1 \
-  APP_ROOT="$(pwd)/../../../" \
+  APP_ROOT="$PROJECT_ROOT/" \
   API_URL=http://localhost:7263 \
-  MODEL_SIZE=base_plus \
-  DATA_PATH="$(pwd)/../../data" \
+  MODEL_SIZE=tiny \
+  DATA_PATH="$PROJECT_ROOT/demo/data" \
   DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4 \
-  gunicorn \
-    --worker-class gthread app:app \
-    --workers 1 \
-    --threads 2 \
-    --bind 0.0.0.0:7263 \
-    --timeout 60 2>&1 &
+  python app.py 2>&1 &
+
 BACKEND_PID=$!
-cd ../../..
+cd "$PROJECT_ROOT"
 
-# Give backend a moment to start
-sleep 8
+# ── Wait for backend to be ready ─────────────────────────────────
+echo "⏳ Waiting for backend to be ready..."
+BACKEND_READY=0
+for i in $(seq 1 90); do
+  if curl -s http://localhost:7263/healthy > /dev/null 2>&1; then
+    echo "✅ Backend ready! (${i}s)"
+    BACKEND_READY=1
+    break
+  fi
+  sleep 1
+done
 
-# Start frontend in background
+if [ $BACKEND_READY -eq 0 ]; then
+  echo "⚠️  Backend taking longer than expected — starting frontend anyway"
+fi
+
+# ── Start frontend ────────────────────────────────────────────────
 echo "🎨 Starting frontend on http://localhost:7262..."
 cd demo/frontend
-yarn install
+yarn install --silent 2>/dev/null || npm install --silent 2>/dev/null
 yarn dev --port 7262 2>&1 &
 FRONTEND_PID=$!
-cd ../..
+cd "$PROJECT_ROOT"
 
-# Wait for both processes
-echo "✅ Both services are running!"
-echo "Frontend: http://localhost:7262"
-echo "Backend:  http://localhost:7263/graphql"
-echo "Press Ctrl+C to stop"
+# ── Done ──────────────────────────────────────────────────────────
+sleep 3
+echo ""
+echo "════════════════════════════════════════"
+echo "  ✅ SAM2 Tracker is running!"
+echo "  🌐 Open: http://localhost:7262"
+echo "  🔧 API:  http://localhost:7263"
+echo "  Press Ctrl+C to stop"
+echo "════════════════════════════════════════"
+echo ""
+
 wait $BACKEND_PID $FRONTEND_PID
