@@ -18,10 +18,10 @@ import VideoGalleryUploadVideo from '@/common/components/gallery/VideoGalleryUpl
 import VideoPhoto from '@/common/components/gallery/VideoPhoto';
 import useScreenSize from '@/common/screen/useScreenSize';
 import {VideoData} from '@/demo/atoms';
-import {DEMO_SHORT_NAME} from '@/demo/DemoConfig';
+import {DEMO_SHORT_NAME, INFERENCE_API_ENDPOINT} from '@/demo/DemoConfig';
 import {fontSize, fontWeight, spacing} from '@/theme/tokens.stylex';
 import stylex from '@stylexjs/stylex';
-import {useMemo} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import PhotoAlbum, {Photo, RenderPhotoProps} from 'react-photo-album';
 import {graphql, useLazyLoadQuery} from 'react-relay';
 import {useLocation, useNavigate} from 'react-router-dom';
@@ -77,6 +77,15 @@ export default function DemoVideoGallery({
   const navigate = useNavigate();
   const location = useLocation();
   const {isMobile: isMobileScreenSize} = useScreenSize();
+
+  // Load previous projects + drafts
+  const [projects, setProjects] = useState<Array<{name: string; thumbnailUrl: string | null}>>([]);
+  const [drafts, setDrafts] = useState<Array<{draft_id: string; video_path: string; video_url: string; thumbnail_url: string | null; objects: Array<{object_id: number; label: string}>}>>([]);
+
+  useEffect(() => {
+    fetch(`${INFERENCE_API_ENDPOINT}/list_exports`).then(r => r.json()).then(d => setProjects(d.exports || [])).catch(() => {});
+    fetch(`${INFERENCE_API_ENDPOINT}/list_drafts`).then(r => r.json()).then(d => setDrafts(d.drafts || [])).catch(() => {});
+  }, []);
 
   const data = useLazyLoadQuery<DemoVideoGalleryQuery>(
     graphql`
@@ -173,37 +182,80 @@ export default function DemoVideoGallery({
     onUpload?.(video);
   }
 
-  const descriptionStyle = 'text-sm md:text-base text-gray-400 leading-snug';
-
   return (
     <div {...stylex.props(styles.container)}>
       <div {...stylex.props(styles.albumContainer)}>
         <div className="pt-0 md:px-16 md:pt-8 md:pb-8">
           <div {...stylex.props(styles.headerContainer)}>
-            <h3 className="mb-2">
-              Select a video to try{' '}
-              <span className="hidden md:inline">
-                with the {DEMO_SHORT_NAME}
-              </span>
-            </h3>
-            <p className={descriptionStyle}>
-              You’ll be able to download what you make.
-            </p>
+            <h3 className="mb-2">Select a video</h3>
+            <p className="text-sm text-gray-400">Gallery, previous projects, or drafts.</p>
           </div>
 
-          <PhotoAlbum<VideoPhotoData>
-            layout="rows"
-            photos={shareableVideos}
-            targetRowHeight={isMobileScreenSize ? 120 : 200}
-            rowConstraints={{
-              singleRowMaxHeight: isMobileScreenSize ? 120 : 240,
-              maxPhotos: 3,
-            }}
-            renderPhoto={renderPhoto}
-            spacing={4}
-          />
+          {showUploadInGallery && (
+            <div style={{marginBottom:24}}>
+              <SectionLabel label="Upload New Video" icon="\u2191" color="#6366f1"/>
+              <VideoGalleryUploadVideo style={{height:120,borderRadius:12}} onUpload={handleUploadVideo} onUploadError={onUploadError} onUploadStart={onUploadStart}/>
+            </div>
+          )}
+
+          {drafts.length > 0 && (
+            <div style={{marginBottom:24}}>
+              <SectionLabel label="Draft Projects" icon="\u23f8" color="#f59e0b"/>
+              <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+                {drafts.map(d => (
+                  <VideoThumbCard key={d.draft_id} src={d.thumbnail_url || d.video_url} label={d.video_path.split('/').pop()?.replace('.mp4','') || 'Draft'} badge="Draft" badgeColor="#f59e0b"
+                    onClick={() => {
+                      fetch(`${INFERENCE_API_ENDPOINT}/load_draft/${d.draft_id}`).then(r=>r.json()).then(dd=>{
+                        navigate(location.pathname,{state:{draft:dd}});
+                        onSelect?.({path:d.video_path,url:d.video_url,posterPath:null,posterUrl:d.video_url,width:1280,height:720} as any);
+                      });
+                    }}/>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {projects.length > 0 && (
+            <div style={{marginBottom:24}}>
+              <SectionLabel label="Previous Projects" icon="\u2713" color="#22c55e"/>
+              <div style={{display:'flex',flexWrap:'wrap',gap:10}}>
+                {projects.map(p => (
+                  <VideoThumbCard key={p.name} src={p.thumbnailUrl ? `${INFERENCE_API_ENDPOINT}/${p.thumbnailUrl}` : null} label={p.name.slice(0,18)+'...'} badge="Done" badgeColor="#22c55e"
+                    onClick={() => {
+                      const url=`${INFERENCE_API_ENDPOINT}/exports/${p.name}/original.mp4`;
+                      const v={path:`exports/${p.name}/original.mp4`,url,posterPath:null,posterUrl:url,width:1280,height:720} as any;
+                      navigate(location.pathname,{state:{video:v}}); onSelect?.(v);
+                    }}/>
+                ))}
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
+    </div>
+  );
+}
+
+function SectionLabel({label,icon,color}:{label:string;icon:string;color:string}) {
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
+      <div style={{width:24,height:24,borderRadius:6,background:`${color}18`,border:`1px solid ${color}33`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12}}>{icon}</div>
+      <span style={{fontSize:13,fontWeight:700,color:'rgba(255,255,255,0.7)'}}>{label}</span>
+    </div>
+  );
+}
+
+function VideoThumbCard({src,label,badge,badgeColor,onClick}:{src:string|null;label:string;badge:string;badgeColor:string;onClick:()=>void}) {
+  return (
+    <div onClick={onClick} style={{width:140,cursor:'pointer',borderRadius:10,overflow:'hidden',border:'1px solid rgba(255,255,255,0.08)',background:'rgba(255,255,255,0.04)',transition:'all 0.2s'}}
+      onMouseEnter={e=>{e.currentTarget.style.borderColor=`${badgeColor}44`;e.currentTarget.style.transform='translateY(-2px)';}}
+      onMouseLeave={e=>{e.currentTarget.style.borderColor='rgba(255,255,255,0.08)';e.currentTarget.style.transform='none';}}>
+      <div style={{width:'100%',aspectRatio:'16/9',background:'#1a1c24',position:'relative',overflow:'hidden'}}>
+        {src && <video src={src} style={{width:'100%',height:'100%',objectFit:'cover'}} muted preload="metadata" onLoadedMetadata={e=>{(e.target as HTMLVideoElement).currentTime=0.1;}}/>}
+        <span style={{position:'absolute',top:5,left:5,fontSize:9,fontWeight:700,background:`${badgeColor}22`,color:badgeColor,border:`1px solid ${badgeColor}44`,padding:'2px 6px',borderRadius:4}}>{badge}</span>
+      </div>
+      <div style={{padding:'7px 8px',fontSize:11,fontWeight:500,color:'rgba(255,255,255,0.6)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{label}</div>
     </div>
   );
 }

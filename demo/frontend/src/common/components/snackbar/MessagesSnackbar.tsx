@@ -26,8 +26,9 @@ import useMessagesSnackbar from './useMessagesSnackbar';
 const styles = stylex.create({
   container: {
     position: 'absolute',
-    top: '8px',
-    right: '8px',
+    top: '12px',
+    right: '12px',
+    zIndex: 20,
   },
   mobileContainer: {
     position: 'absolute',
@@ -36,21 +37,22 @@ const styles = stylex.create({
     right: '8px',
   },
   messageContainer: {
-    padding: '12px 16px',
+    padding: '10px 14px',
     color: '#fff',
     borderRadius: '10px',
-    fontSize: '0.85rem',
+    fontSize: '0.82rem',
     fontWeight: 500,
-    maxWidth: 360,
-    border: '1px solid rgba(99,102,241,0.4)',
-    background: 'rgba(13,14,20,0.92)',
+    maxWidth: 300,
+    border: '1px solid rgba(99,102,241,0.3)',
+    background: 'rgba(18,20,26,0.95)',
     backdropFilter: 'blur(12px)',
-    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px rgba(99,102,241,0.1)',
     letterSpacing: '0.01em',
+    lineHeight: '1.4',
   },
   messageWarningContainer: {
-    background: 'rgba(245,158,11,0.15)',
-    border: '1px solid rgba(245,158,11,0.4)',
+    background: 'rgba(245,158,11,0.12)',
+    border: '1px solid rgba(245,158,11,0.3)',
     color: '#fbbf24',
   },
   messageContent: {
