@@ -41,3 +41,4 @@ chmod +x run-demo.sh
 > ⏳ First run: model loads in ~30-60 seconds. Wait for "✅ Backend ready"
 
 ## ✅ Open browser: http://localhost:7262
+updated
