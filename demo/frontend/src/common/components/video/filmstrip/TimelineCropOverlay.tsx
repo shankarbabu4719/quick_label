@@ -19,6 +19,8 @@ import {useEffect, useRef} from 'react';
 type Props = {
   startFraction: number;
   endFraction: number;
+  totalFrames?: number;
+  fps?: number;
   onChange: (start: number, end: number) => void;
   onCommit?: (start: number, end: number) => void;
 };
@@ -27,15 +29,22 @@ const HANDLE_W = 12;
 const HANDLE_COLOR = '#6366f1';
 const DIMMED = 'rgba(0,0,0,0.55)';
 
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = (seconds % 60).toFixed(1);
+  return m > 0 ? `${m}:${s.padStart(4, '0')}` : `${s}s`;
+}
+
 export default function TimelineCropOverlay({
   startFraction,
   endFraction,
+  totalFrames = 0,
+  fps = 30,
   onChange,
   onCommit,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Store latest prop values in refs so event listeners always see current values
   const draggingRef = useRef<'start' | 'end' | null>(null);
   const startRef = useRef(startFraction);
   const endRef = useRef(endFraction);
@@ -47,7 +56,6 @@ export default function TimelineCropOverlay({
   onChangeRef.current = onChange;
   onCommitRef.current = onCommit;
 
-  // Register stable window listeners once on mount
   useEffect(() => {
     function getFraction(clientX: number): number {
       const rect = containerRef.current?.getBoundingClientRect();
@@ -91,7 +99,7 @@ export default function TimelineCropOverlay({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, []); // empty deps — stable listeners that read from refs
+  }, []);
 
   function startDrag(side: 'start' | 'end') {
     return (e: React.PointerEvent) => {
@@ -104,6 +112,18 @@ export default function TimelineCropOverlay({
   const startPct = `${(startFraction * 100).toFixed(2)}%`;
   const endPct   = `${(endFraction   * 100).toFixed(2)}%`;
   const rightPct = `${((1 - endFraction) * 100).toFixed(2)}%`;
+
+  // Time calculations
+  const startSec  = totalFrames > 0 ? (startFraction * totalFrames) / fps : 0;
+  const endSec    = totalFrames > 0 ? (endFraction   * totalFrames) / fps : 0;
+  const durSec    = endSec - startSec;
+  const startTime = formatTime(startSec);
+  const endTime   = formatTime(endSec);
+  const durTime   = formatTime(durSec);
+
+  // Label position — clamp so it doesn't overflow
+  const startLabelLeft = Math.min(startFraction * 100, 85);
+  const endLabelRight  = Math.min((1 - endFraction) * 100, 85);
 
   return (
     <div
@@ -122,21 +142,49 @@ export default function TimelineCropOverlay({
         width: rightPct, background: DIMMED, pointerEvents: 'none',
       }} />
 
-      {/* Top border of selection */}
+      {/* Top border */}
       <div style={{
         position: 'absolute', top: 0, height: 2,
         left: startPct, right: rightPct,
         background: HANDLE_COLOR, pointerEvents: 'none',
       }} />
 
-      {/* Bottom border of selection */}
+      {/* Bottom border */}
       <div style={{
         position: 'absolute', bottom: 0, height: 2,
         left: startPct, right: rightPct,
         background: HANDLE_COLOR, pointerEvents: 'none',
       }} />
 
-      {/* ── LEFT HANDLE ── */}
+      {/* ── Duration label (center of selection) ── */}
+      {totalFrames > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: startPct,
+          right: rightPct,
+          transform: 'translateY(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            background: 'rgba(99,102,241,0.85)',
+            color: '#fff',
+            fontSize: 11,
+            fontWeight: 700,
+            padding: '2px 7px',
+            borderRadius: 6,
+            whiteSpace: 'nowrap',
+            letterSpacing: '0.03em',
+          }}>
+            {durTime}
+          </div>
+        </div>
+      )}
+
+      {/* ── LEFT HANDLE + time label ── */}
       <div
         onPointerDown={startDrag('start')}
         style={{
@@ -152,9 +200,30 @@ export default function TimelineCropOverlay({
           userSelect: 'none',
         }}>
         <Grip />
+        {/* Start time tooltip above handle */}
+        {totalFrames > 0 && (
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            marginBottom: 3,
+            background: '#1e1f26',
+            color: '#818cf8',
+            fontSize: 10,
+            fontWeight: 700,
+            padding: '2px 6px',
+            borderRadius: 4,
+            whiteSpace: 'nowrap',
+            border: '1px solid rgba(99,102,241,0.4)',
+            pointerEvents: 'none',
+          }}>
+            {startTime}
+          </div>
+        )}
       </div>
 
-      {/* ── RIGHT HANDLE ── */}
+      {/* ── RIGHT HANDLE + time label ── */}
       <div
         onPointerDown={startDrag('end')}
         style={{
@@ -170,6 +239,27 @@ export default function TimelineCropOverlay({
           userSelect: 'none',
         }}>
         <Grip />
+        {/* End time tooltip above handle */}
+        {totalFrames > 0 && (
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            marginBottom: 3,
+            background: '#1e1f26',
+            color: '#818cf8',
+            fontSize: 10,
+            fontWeight: 700,
+            padding: '2px 6px',
+            borderRadius: 4,
+            whiteSpace: 'nowrap',
+            border: '1px solid rgba(99,102,241,0.4)',
+            pointerEvents: 'none',
+          }}>
+            {endTime}
+          </div>
+        )}
       </div>
     </div>
   );

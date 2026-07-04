@@ -315,6 +315,8 @@ export default function VideoFilmstrip() {
         <TimelineCropOverlay
           startFraction={cropStart}
           endFraction={cropEnd}
+          totalFrames={video?.numberOfFrames ?? 0}
+          fps={fpsRef.current}
           onChange={(s, e) => {
             setCropStart(s);
             setCropEnd(e);
