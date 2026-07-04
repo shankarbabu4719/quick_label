@@ -36,10 +36,20 @@ export default function ExtractFramesOption() {
       if (!response.ok) throw new Error('Failed to extract frames');
 
       const blob = await response.blob();
+      if (blob.size < 100) {
+        alert(`No frames extracted. Your crop range may be too short for ${fps} FPS.\nTry a lower FPS (e.g. 1 or 2) or select a longer video segment.`);
+        return;
+      }
+
+      // Get filename from header
+      const disposition = response.headers.get('Content-Disposition') || '';
+      const match = disposition.match(/filename=([^;]+)/);
+      const filename = match ? match[1] : `frames_${fps}fps.zip`;
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `frames_${fps}fps.zip`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
