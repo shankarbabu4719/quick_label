@@ -19,7 +19,6 @@ import ExtractFramesOption from '@/common/components/options/ExtractFramesOption
 import RestartSessionButton from '@/common/components/session/RestartSessionButton';
 import useMessagesSnackbar from '@/common/components/snackbar/useDemoMessagesSnackbar';
 import {OBJECT_TOOLBAR_INDEX} from '@/common/components/toolbar/ToolbarConfig';
-import {Add} from '@carbon/icons-react';
 import {useEffect, useRef} from 'react';
 import {useNavigate} from 'react-router-dom';
 
@@ -41,141 +40,119 @@ export default function MoreOptionsToolbar({onTabChange}: Props) {
 
   return (
     <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      padding: '28px 24px',
-      gap: 0,
+      display: 'flex', flexDirection: 'column',
+      height: '100%', overflow: 'hidden',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     }}>
+      {/* ── Scrollable content ── */}
+      <div style={{flex: 1, overflowY: 'auto', padding: '22px 20px 8px'}}>
 
-      {/* ── Header ── */}
-      <div style={{marginBottom: 24}}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 8,
-          background: 'rgba(34,197,94,0.15)',
-          border: '1px solid rgba(34,197,94,0.3)',
-          borderRadius: 20,
-          padding: '4px 12px',
-          fontSize: 12,
-          fontWeight: 600,
-          color: '#22c55e',
-          marginBottom: 12,
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-        }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: '#22c55e',
-            boxShadow: '0 0 6px #22c55e',
-          }} />
-          Complete
-        </div>
-        <h2 style={{
-          fontSize: 22,
-          fontWeight: 700,
-          color: '#fff',
-          margin: 0,
-          letterSpacing: '-0.3px',
-          lineHeight: 1.3,
-        }}>
-          Nice work!<br />
-          <span style={{color: 'rgba(255,255,255,0.5)', fontSize: 16, fontWeight: 400}}>
+        {/* Header */}
+        <div style={{marginBottom: 20}}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7,
+            background: 'rgba(34,197,94,0.12)',
+            border: '1px solid rgba(34,197,94,0.3)',
+            borderRadius: 20, padding: '3px 11px',
+            fontSize: 11, fontWeight: 700, color: '#22c55e',
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            marginBottom: 10,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: '#22c55e', boxShadow: '0 0 6px #22c55e',
+            }} />
+            Export Ready
+          </div>
+          <h2 style={{
+            fontSize: 20, fontWeight: 700, color: '#fff',
+            margin: '0 0 4px', letterSpacing: '-0.3px',
+          }}>Nice work!</h2>
+          <p style={{fontSize: 13, color: 'rgba(255,255,255,0.4)', margin: 0}}>
             Download your results below.
-          </span>
-        </h2>
-      </div>
+          </p>
+        </div>
 
-      {/* ── Download section ── */}
-      <div style={{
-        background: 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        borderRadius: 12,
-        padding: '16px',
-        marginBottom: 16,
-      }}>
+        {/* Export section */}
         <div style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: 'rgba(255,255,255,0.3)',
-          letterSpacing: '0.07em',
-          textTransform: 'uppercase',
-          marginBottom: 12,
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 14, padding: 16, marginBottom: 12,
         }}>
-          Export
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.3)',
+            letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12,
+          }}>
+            Downloads
+          </div>
+          <DownloadOption />
+          <div style={{marginTop: 8}}>
+            <DownloadJSONOption />
+          </div>
         </div>
-        <DownloadOption />
-        <div style={{marginTop: 8}}>
-          <DownloadJSONOption />
-        </div>
-        <div style={{marginTop: 8}}>
+
+        {/* Frame extract section */}
+        <div style={{
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 14, padding: 16, marginBottom: 12,
+        }}>
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.3)',
+            letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12,
+          }}>
+            Frame Extraction
+          </div>
           <ExtractFramesOption />
         </div>
-      </div>
 
-      {/* ── Try another video ── */}
-      <div style={{
-        background: 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        borderRadius: 12,
-        padding: '16px',
-        marginBottom: 'auto',
-      }}>
+        {/* Continue section */}
         <div style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: 'rgba(255,255,255,0.3)',
-          letterSpacing: '0.07em',
-          textTransform: 'uppercase',
-          marginBottom: 12,
+          background: 'rgba(255,255,255,0.04)',
+          border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: 14, padding: 16, marginBottom: 4,
         }}>
-          Continue
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.3)',
+            letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12,
+          }}>
+            Continue
+          </div>
+          <RestartSessionButton
+            onRestartSession={() => onTabChange(OBJECT_TOOLBAR_INDEX)}
+          />
         </div>
-        <RestartSessionButton
-          onRestartSession={() => onTabChange(OBJECT_TOOLBAR_INDEX)}
-        />
       </div>
 
-      {/* ── Bottom: Create New Project ── */}
-      <div style={{marginTop: 24}}>
-        <div style={{
-          height: 1,
-          background: 'rgba(255,255,255,0.07)',
-          marginBottom: 20,
-        }} />
+      {/* ── Sticky bottom: New Project ── */}
+      <div style={{
+        padding: '14px 20px 18px',
+        borderTop: '1px solid rgba(255,255,255,0.07)',
+        background: 'rgba(0,0,0,0.2)',
+      }}>
         <button
           onClick={() => navigate('/')}
           style={{
-            width: '100%',
-            padding: '14px 20px',
-            background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-            border: 'none',
-            borderRadius: 12,
-            color: '#fff',
-            fontSize: 15,
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
+            width: '100%', padding: '12px 20px',
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            border: 'none', borderRadius: 10,
+            color: '#fff', fontSize: 14, fontWeight: 700,
+            cursor: 'pointer', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', gap: 8,
             boxShadow: '0 4px 16px rgba(99,102,241,0.35)',
-            transition: 'all 0.2s',
+            transition: 'all 0.18s', letterSpacing: '-0.1px',
           }}
           onMouseEnter={e => {
             e.currentTarget.style.transform = 'translateY(-1px)';
             e.currentTarget.style.boxShadow = '0 6px 20px rgba(99,102,241,0.5)';
           }}
           onMouseLeave={e => {
-            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.transform = 'none';
             e.currentTarget.style.boxShadow = '0 4px 16px rgba(99,102,241,0.35)';
           }}>
-          <Add size={20} />
-          Create New Project
+          + Create New Project
         </button>
       </div>
-
     </div>
   );
 }
