@@ -28,6 +28,7 @@ const styles = stylex.create({
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
+    justifyContent: 'center',
     width: '100%',
     height: '100%',
     borderRadius: '0.375rem',
