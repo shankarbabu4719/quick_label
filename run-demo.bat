@@ -59,19 +59,16 @@ if errorlevel 1 (
   npm install -g yarn
 )
 
-REM ── Virtual environment ───────────────────────────────────────
-if not exist "venv\" (
-  echo [33m Creating Python virtual environment...[0m
-  python -m venv venv
+REM ── Virtual environment (optional — use only if venv exists) ────────────
+if exist "venv\Scripts\python.exe" (
+  call venv\Scripts\activate.bat
 )
-
-call venv\Scripts\activate.bat
 
 REM ── Install Python deps if needed ────────────────────────────
 python -c "import sam2" >nul 2>&1
 if errorlevel 1 (
   echo [33m Installing Python dependencies (first time ~5 min)...[0m
-  pip install -q -e ".[demo]"
+  pip install -q -e "." strawberry-graphql[flask] flask-cors dataclasses-json imagesize tqdm pycocotools av hydra-core iopath decord
 )
 
 REM ── Checkpoints ──────────────────────────────────────────────
@@ -94,12 +91,13 @@ REM ── Start backend ──────────────────�
 echo [32m Starting backend on port 7263...[0m
 cd demo\backend\server
 
-set SAM2_DEMO_FORCE_CPU_DEVICE=1
-set APP_ROOT=%PROJECT_ROOT%
-set API_URL=http://localhost:7263
-set MODEL_SIZE=tiny
-set DATA_PATH=%PROJECT_ROOT%demo\data
-set DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4
+set "SAM2_DEMO_FORCE_CPU_DEVICE=1"
+set "APP_ROOT=%PROJECT_ROOT%"
+set "API_URL=http://localhost:7263"
+set "MODEL_SIZE=tiny"
+set "DATA_PATH=%PROJECT_ROOT%demo\data"
+set "DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4"
+set "SAM2_MAX_FRAMES=300"
 
 start /b "" python app.py > "%PROJECT_ROOT%backend.log" 2>&1
 cd "%PROJECT_ROOT%"
