@@ -21,8 +21,8 @@ Write-Host "Cleaning up old processes..." -ForegroundColor Yellow
 Get-Process -Name python -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 $ports = @(7262, 7263)
 foreach ($port in $ports) {
-    $pid = (Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue).OwningProcess
-    if ($pid) { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue }
+    $processId = (Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue).OwningProcess
+    if ($processId) { Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue }
 }
 Start-Sleep -Seconds 1
 
