@@ -19,6 +19,7 @@ from app_conf import (
     EXPORTS_PREFIX,
     DRAFTS_PATH,
     DRAFTS_PREFIX,
+    DATA_PATH,
 )
 from data.loader import preload_data
 from data.schema import schema
@@ -382,14 +383,11 @@ def extract_frames(session_id: str) -> Response:
             ) if EXPORTS_PATH.exists() else []
             export_folder = folders[0] if folders else EXPORTS_PATH
 
-        # Prefer masked video, fall back to original
-        video_file = export_folder / "masked.mp4"
+        # Prefer original video for frame extraction (masked may have encoding issues)
+        # masked.mp4 is encoded by browser WebCodecs which may have duration metadata issues
+        video_file = export_folder / "original.mp4"
         if not video_file.exists():
-            video_file = export_folder / "original.mp4"
-        if not video_file.exists():
-            # Use session video path directly
-            video_file = video_path
-
+            video_file = export_folder / "masked.mp4"
         if not os.path.isfile(str(video_file)):
             return make_response({"error": "No video found for this session"}, 404)
 
@@ -402,27 +400,10 @@ def extract_frames(session_id: str) -> Response:
             os.makedirs(frames_dir)
 
             # Build ffmpeg command to extract frames at given FPS
-            cmd = [ffmpeg, "-y"]
-
-            # Apply time range if start_frame/end_frame provided
-            # Assume 30fps source for frame-to-time conversion
-            source_fps = 30.0
-            if start_frame is not None and start_frame > 0:
-                cmd += ["-ss", str(start_frame / source_fps)]
-
-            cmd += ["-i", str(video_file)]
-
-            if end_frame is not None:
-                if start_frame is not None and start_frame > 0:
-                    duration = (end_frame - start_frame) / source_fps
-                else:
-                    duration = end_frame / source_fps
-                cmd += ["-t", str(duration)]
-
-            cmd += [
-                "-vf", f"fps={fps}",
-                os.path.join(frames_dir, "frame_%06d.png")
-            ]
+            # Note: video is already trimmed to crop range — extract all frames
+            cmd = [ffmpeg, "-y", "-i", str(video_file),
+                   "-vf", f"fps={fps}",
+                   os.path.join(frames_dir, "frame_%06d.png")]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
@@ -451,6 +432,7 @@ def extract_frames(session_id: str) -> Response:
 
             with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 frame_files = sorted(os.listdir(frames_dir))
+                source_fps = 30.0  # assumed source FPS for frame index mapping
                 for i, fname in enumerate(frame_files):
                     # Add image frame
                     zf.write(os.path.join(frames_dir, fname), fname)
