@@ -13,9 +13,9 @@ sudo apt install -y nodejs
 npm install -g yarn
 ```
 
-## 3. Clone project
+## 3. Clone project (HTTPS — no SSH key needed)
 ```bash
-git clone git@gitlab.com:superuser.surveillance/sam2_labelme.git
+git clone https://gitlab.com/superuser.surveillance/sam2_labelme.git
 cd sam2_labelme
 git checkout ubuntu
 ```
@@ -26,6 +26,7 @@ python3.11 -m venv venv
 source venv/bin/activate
 pip install -e ".[demo]"
 ```
+> ⏳ This step downloads PyTorch (~2GB). Wait until it finishes.
 
 ## 5. Frontend setup
 ```bash
@@ -37,5 +38,6 @@ cd demo/frontend && yarn install && cd ../..
 chmod +x run-demo.sh
 ./run-demo.sh
 ```
+> ⏳ First run: model loads in ~30-60 seconds. Wait for "✅ Backend ready"
 
 ## ✅ Open browser: http://localhost:7262
