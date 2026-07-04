@@ -399,36 +399,23 @@ def extract_frames(session_id: str) -> Response:
             frames_dir = os.path.join(tmpdir, "frames")
             os.makedirs(frames_dir)
 
-            # Get actual video frame count and fps to determine extraction rate
-            ffprobe_cmd = [ffmpeg.replace("ffmpeg", "ffprobe") if "ffprobe" not in ffmpeg else ffprobe_path,
-                          "-v", "quiet", "-show_entries", "stream=nb_frames,r_frame_rate,duration",
-                          "-select_streams", "v:0", "-of", "json", str(video_file)]
+            # Get actual video fps for accurate frame extraction
             try:
-                import shutil as sh
-                ffprobe_path = sh.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
+                import shutil as _sh
+                ffprobe_path = _sh.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
                 ffprobe_result = subprocess.run(
                     [ffprobe_path, "-v", "quiet", "-show_entries",
                      "stream=nb_frames,r_frame_rate,duration",
                      "-select_streams", "v:0", "-of", "json", str(video_file)],
                     capture_output=True, text=True
                 )
-                import json as _json
-                probe_data = _json.loads(ffprobe_result.stdout)
+                probe_data = json.loads(ffprobe_result.stdout)
                 stream = probe_data.get("streams", [{}])[0]
-                video_duration = float(stream.get("duration", 1.0))
-                # If video is shorter than 1/fps, extract at source fps instead
-                if video_duration < 1.0 / fps:
-                    # Extract all frames from the source
-                    src_fps_str = stream.get("r_frame_rate", "24/1")
-                    num, den = src_fps_str.split("/")
-                    effective_fps = float(num) / float(den)
-                    logger.info(f"Video too short ({video_duration:.3f}s) for {fps}fps, using source fps {effective_fps}")
-                else:
-                    effective_fps = fps
+                effective_fps = fps  # always use user-selected fps
             except Exception:
                 effective_fps = fps
 
-            # Build ffmpeg command to extract frames
+            # Build ffmpeg command to extract frames at user-selected FPS
             cmd = [ffmpeg, "-y", "-i", str(video_file),
                    "-vf", f"fps={effective_fps}",
                    os.path.join(frames_dir, "frame_%06d.png")]
