@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import Logger from '@/common/logger/Logger';
-import {inputVideoAtom, sessionAtom, trackletObjectsAtom} from '@/demo/atoms';
+import {inputVideoAtom, objectLabelsAtom, sessionAtom, trackletObjectsAtom} from '@/demo/atoms';
 import {INFERENCE_API_ENDPOINT} from '@/demo/DemoConfig';
 import {useAtomValue} from 'jotai';
 import {useCallback} from 'react';
@@ -44,7 +44,7 @@ export default function useSaveDraft() {
 
     const objects = tracklets.map(t => ({
       object_id: t.id,
-      label: `Object ${t.id}`,
+      label: objectLabels[t.id] ?? `Object ${t.id + 1}`,
     }));
 
     try {

@@ -47,6 +47,43 @@ def healthy() -> Response:
     return make_response("OK", 200)
 
 
+@app.route("/get_model", methods=["GET"])
+def get_model() -> Response:
+    """Return current model size."""
+    from app_conf import MODEL_SIZE
+    return make_response({"model": MODEL_SIZE}, 200)
+
+
+@app.route("/set_model", methods=["POST"])
+def set_model() -> Response:
+    """
+    Change the active model size and restart the inference API.
+    Body: { "model": "tiny" | "small" | "base_plus" }
+    This reloads the predictor in-place — no server restart needed.
+    """
+    import json, threading
+
+    body = request.get_json(force=True) or {}
+    new_model = body.get("model", "tiny")
+    allowed = {"tiny", "small", "base_plus", "large"}
+    if new_model not in allowed:
+        return make_response({"error": f"Invalid model. Choose from: {allowed}"}, 400)
+
+    def reload():
+        import os
+        os.environ["MODEL_SIZE"] = new_model
+        # Reload the inference API with the new model
+        global inference_api
+        try:
+            inference_api = InferenceAPI()
+            logger.info(f"Model reloaded: {new_model}")
+        except Exception as e:
+            logger.error(f"Failed to reload model: {e}")
+
+    threading.Thread(target=reload, daemon=True).start()
+    return make_response({"success": True, "model": new_model}, 200)
+
+
 @app.route(f"/{GALLERY_PREFIX}/<path:path>", methods=["GET"])
 def send_gallery_video(path: str) -> Response:
     try:
@@ -271,10 +308,20 @@ def list_exports() -> Response:
 @app.route(f"/{EXPORTS_PREFIX}/<path:path>", methods=["GET"])
 def send_exported_file(path: str):
     try:
-        return send_from_directory(
-            str(EXPORTS_PATH), path)
-    except:
-        raise ValueError("resource not found")
+        # Force download for JSON files
+        if path.endswith('.json'):
+            file_path = EXPORTS_PATH / path
+            if not file_path.exists():
+                return make_response("Not found", 404)
+            response = make_response(file_path.read_text(encoding='utf-8'))
+            response.headers["Content-Type"] = "application/json"
+            response.headers["Content-Disposition"] = f"attachment; filename={file_path.name}"
+            return response
+        # Serve video/other files normally
+        return send_from_directory(str(EXPORTS_PATH), path)
+    except Exception as e:
+        logger.error(f"Error serving export file {path}: {e}")
+        return make_response("resource not found", 404)
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +549,27 @@ def extract_frames(session_id: str) -> Response:
         return make_response({"error": str(e)}, 404)
     except Exception as e:
         logger.error(f"Error extracting frames: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/update_labels/<session_id>", methods=["POST"])
+def update_labels(session_id: str) -> Response:
+    """
+    Update object labels for a session.
+    Body: { "labels": {"0": "Person", "1": "Ball"} }
+    """
+    import json
+    try:
+        body = request.get_json(force=True) or {}
+        labels = body.get("labels", {})
+        session = inference_api._InferenceAPI__get_session(session_id)
+        # Store labels in session
+        session["object_labels"] = {int(k): v for k, v in labels.items()}
+        logger.info(f"Updated labels for session {session_id}: {labels}")
+        return make_response({"success": True}, 200)
+    except RuntimeError as e:
+        return make_response({"error": str(e)}, 404)
+    except Exception as e:
         return make_response({"error": str(e)}, 500)
 
 
