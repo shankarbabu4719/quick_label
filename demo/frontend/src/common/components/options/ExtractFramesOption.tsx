@@ -33,27 +33,16 @@ export default function ExtractFramesOption() {
       const response = await fetch(
         `${INFERENCE_API_ENDPOINT}/extract_frames/${session.id}?${params.toString()}`,
       );
+
       if (!response.ok) throw new Error('Failed to extract frames');
 
-      const blob = await response.blob();
-      if (blob.size < 100) {
-        alert(`No frames extracted. Your crop range may be too short for ${fps} FPS.\nTry a lower FPS (e.g. 1 or 2) or select a longer video segment.`);
-        return;
+      const data = await response.json();
+
+      if (data.success) {
+        alert(`✅ ${data.frame_count} frames saved!\n\nFolder: ${data.folder_name}\n\nCheck your exports folder on the server.`);
+      } else {
+        throw new Error(data.error || 'Unknown error');
       }
-
-      // Get filename from header
-      const disposition = response.headers.get('Content-Disposition') || '';
-      const match = disposition.match(/filename=([^;]+)/);
-      const filename = match ? match[1] : `frames_${fps}fps.zip`;
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
     } catch (e) {
       Logger.error('Failed to extract frames:', e);
       alert('Failed to extract frames. Make sure the project is exported first.');
