@@ -33,6 +33,7 @@ import useVideo from '@/common/components/video/editor/useVideo';
 import InteractionLayer from '@/common/components/video/layers/InteractionLayer';
 import {PointsLayer} from '@/common/components/video/layers/PointsLayer';
 import LoadingStateScreen from '@/common/loading/LoadingStateScreen';
+import FullscreenLoader from '@/common/loading/FullscreenLoader';
 import UploadLoadingScreen from '@/common/loading/UploadLoadingScreen';
 import useScreenSize from '@/common/screen/useScreenSize';
 import {SegmentationPoint} from '@/common/tracker/Tracker';
@@ -64,7 +65,7 @@ const styles = stylex.create({
     overflow: 'hidden',
     width: '100%',
     borderColor: 'rgba(255,255,255,0.06)',
-    backgroundColor: '#0F1117',
+    backgroundColor: '#12141A',
     borderWidth: 1,
     borderRadius: 14,
     '@media screen and (max-width: 768px)': {
@@ -97,6 +98,10 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
 
   const [isSessionStartFailed, setIsSessionStartFailed] =
     useState<boolean>(false);
+
+  // Loading steps — track real events
+  const [loadingStep, setLoadingStep] = useState<number>(0);
+  // 0 = waiting, 1 = video decoded, 2 = session started
 
   const [session, setSession] = useAtom(sessionAtom);
   // Use a ref so crop range changes never re-trigger the session useEffect
@@ -138,13 +143,17 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
       setFrameIndex(event.index);
     }
 
-    // Listen to frame updates to fetch the frame index in the main thread,
-    // which is then used downstream to render points per frame.
     video?.addEventListener('frameUpdate', onFrameUpdate);
 
+    // Step 1: video decoded
+    function onDecoded() {
+      setLoadingStep(1);
+    }
+    video?.addEventListener('decode', onDecoded);
+
     function onSessionStarted(event: SessionStartedEvent) {
+      setLoadingStep(2);
       setSession({id: event.sessionId, ranPropagation: false});
-      // Seek to crop start frame after session starts (use ref to avoid re-triggering effect)
       const cr = cropRangeRef.current;
       if (cr.startFrame > 0 && video != null) {
         video.frame = cr.startFrame;
@@ -184,10 +193,12 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
     return () => {
       video?.closeSession();
       video?.removeEventListener('frameUpdate', onFrameUpdate);
+      video?.removeEventListener('decode', onDecoded);
       video?.removeEventListener('sessionStarted', onSessionStarted);
       video?.removeEventListener('sessionStartFailed', onSessionStartFailed);
       video?.removeEventListener('trackletsUpdated', onTrackletsUpdated);
       video?.removeEventListener('renderingError', onRenderingError);
+      setLoadingStep(0);
     };
   }, [
     setFrameIndex,
@@ -270,14 +281,11 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
 
   return (
     <>
-      {(isVideoLoading || session === null) && !isSessionStartFailed && (
-        <div {...stylex.props(styles.loadingScreenWrapper)}>
-          <LoadingStateScreen
-            title="Loading demo..."
-            description="This may take a few moments, you're almost there!"
-          />
-        </div>
+      {/* Session loading — unified FullscreenLoader */}
+      {session === null && !isSessionStartFailed && (
+        <FullscreenLoader loadingStep={loadingStep} />
       )}
+
       {isSessionStartFailed && (
         <div {...stylex.props(styles.loadingScreenWrapper)}>
           <LoadingStateScreen

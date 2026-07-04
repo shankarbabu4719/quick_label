@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 import useUploadVideo from '@/common/components/gallery/useUploadVideo';
+import ModelSelectPage from '@/common/components/model/ModelSelectPage';
 import Logger from '@/common/logger/Logger';
 import {sessionAtom, uploadingStateAtom} from '@/demo/atoms';
-import {MAX_UPLOAD_FILE_SIZE} from '@/demo/DemoConfig';
+import {MAX_UPLOAD_FILE_SIZE, INFERENCE_API_ENDPOINT} from '@/demo/DemoConfig';
 import {useSetAtom} from 'jotai';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
@@ -105,6 +106,9 @@ export default function ProjectHubPage() {
   const [drafts, setDrafts]     = useState<DraftProject[]>([]);
   const [loading, setLoading]   = useState(true);
   const [dragging, setDragging] = useState(false);
+  const [currentModel, setCurrentModel] = useState('tiny');
+  const [modelSelected, setModelSelected] = useState(false);
+  const [pendingDraft, setPendingDraft] = useState<DraftProject | null>(null);
   const navigate = useNavigate();
   const setUploadingState = useSetAtom(uploadingStateAtom);
   const setSession        = useSetAtom(sessionAtom);
@@ -115,7 +119,14 @@ export default function ProjectHubPage() {
     onUploadStart: () => setUploadingState('uploading'),
   });
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    fetchAll();
+    // Get current model from backend
+    fetch(`${INFERENCE_API_ENDPOINT}/get_model`)
+      .then(r => r.json())
+      .then(d => { setCurrentModel(d.model || 'tiny'); setModelSelected(true); })
+      .catch(() => setModelSelected(false));
+  }, []);
 
   async function fetchAll() {
     setLoading(true);
@@ -141,12 +152,23 @@ export default function ProjectHubPage() {
   }
 
   async function handleResumeDraft(draft: DraftProject) {
-    try { const r = await fetch(`http://localhost:7263/load_draft/${draft.draft_id}`); const d = await r.json(); navigate('/demo', {state: {draft: d}}); } catch(e) { Logger.error(e); }
+    // Model must be selected first
+    if (!modelSelected) {
+      alert('Please select a model first before resuming a draft.');
+      window.scrollTo({top: 0, behavior: 'smooth'});
+      return;
+    }
+    try {
+      const r = await fetch(`http://localhost:7263/load_draft/${draft.draft_id}`);
+      const d = await r.json();
+      navigate('/demo', {state: {draft: d}});
+    } catch (e) {
+      Logger.error('Failed to load draft:', e);
+    }
   }
 
   async function handleDeleteDraft(id: string, e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm('Delete this draft?')) return;
     try { await fetch(`http://localhost:7263/delete_draft/${id}`, {method: 'DELETE'}); fetchDrafts(); } catch(e) { Logger.error(e); }
   }
 
@@ -159,7 +181,7 @@ export default function ProjectHubPage() {
   }
 
   return (
-    <div style={{minHeight:'100vh', background:C.bg, color:C.text, fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+    <div style={{minHeight:'100vh', background:'linear-gradient(145deg, #12141A 0%, #1A1D27 50%, #12141A 100%)', color:C.text, fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
 
       {/* ── Nav ── */}
       <nav style={{
@@ -249,7 +271,79 @@ export default function ProjectHubPage() {
             ))}
           </div>
 
-          {/* Upload zone */}
+        {/* Model Selection — before upload */}
+        {!modelSelected ? (
+          <>
+            {pendingDraft && (
+              <div style={{
+                marginBottom: 16, padding: '10px 14px',
+                background: 'rgba(245,158,11,0.08)',
+                border: '1px solid rgba(245,158,11,0.2)',
+                borderRadius: 10,
+                fontSize: 13, color: '#fbbf24',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span>⏸</span>
+                Select a model to resume your draft: <strong>{videoName(pendingDraft.video_path)}</strong>
+              </div>
+            )}
+            <ModelSelectPage
+              currentModel={currentModel}
+              onSelect={async (model) => {
+                setCurrentModel(model);
+                setModelSelected(true);
+                // If there's a pending draft, resume it
+                if (pendingDraft) {
+                  try {
+                    const r = await fetch(`http://localhost:7263/load_draft/${pendingDraft.draft_id}`);
+                    const d = await r.json();
+                    navigate('/demo', {state: {draft: d}});
+                  } catch (e) {
+                    Logger.error('Failed to load draft:', e);
+                    setPendingDraft(null);
+                  }
+                }
+              }}
+            />
+          </>
+        ) : (
+          <>
+            {/* Selected model badge + change option */}
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 16,
+              padding: '10px 14px',
+              background: 'rgba(99,102,241,0.08)',
+              border: '1px solid rgba(99,102,241,0.2)',
+              borderRadius: 10,
+            }}>
+              <div style={{display:'flex', alignItems:'center', gap:8}}>
+                <span style={{fontSize:16}}>
+                  {currentModel === 'tiny' ? '🚀' : currentModel === 'small' ? '⚖️' : '🎯'}
+                </span>
+                <div>
+                  <div style={{fontSize:12, fontWeight:700, color:'#818cf8'}}>
+                    SAM 2.1 {currentModel === 'base_plus' ? 'Base+' : currentModel.charAt(0).toUpperCase() + currentModel.slice(1)}
+                  </div>
+                  <div style={{fontSize:11, color:'rgba(255,255,255,0.3)'}}>Active model</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setModelSelected(false)}
+                style={{
+                  fontSize:11, fontWeight:600,
+                  color:'#818cf8',
+                  background:'rgba(99,102,241,0.1)',
+                  border:'1px solid rgba(99,102,241,0.2)',
+                  borderRadius:6, padding:'4px 10px',
+                  cursor:'pointer',
+                }}>
+                Change
+              </button>
+            </div>
+
+            {/* Upload zone */}
           <div
             {...getRootProps()}
             onDragEnter={() => setDragging(true)}
@@ -282,6 +376,8 @@ export default function ProjectHubPage() {
               or <span style={{color:C.indigo, fontWeight:600}}>click to browse</span> · {MAX_UPLOAD_FILE_SIZE} max · MP4 / MOV · up to 2 min
             </div>
           </div>
+          </>
+        )}
         </div>
 
         {/* ── Previous Projects ── */}
@@ -308,6 +404,19 @@ export default function ProjectHubPage() {
 
         {/* ── Drafts ── */}
         <SectionHeader title="Draft Projects" count={drafts.length} accentColor={C.amber} icon="⏸" />
+        {!modelSelected && drafts.length > 0 && (
+          <div style={{
+            marginBottom: 12, padding: '10px 14px',
+            background: 'rgba(245,158,11,0.08)',
+            border: '1px solid rgba(245,158,11,0.2)',
+            borderRadius: 10, fontSize: 12,
+            color: 'rgba(245,158,11,0.8)',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span>⚠️</span>
+            Select a model above (Step 1) before resuming a draft.
+          </div>
+        )}
         {drafts.length === 0 ? (
           <EmptyState text="Start a project and leave mid-way — it will auto-save here." />
         ) : (
@@ -320,7 +429,7 @@ export default function ProjectHubPage() {
                 badge="Draft" badgeColor={C.amber}
                 meta={`${d.objects.length} obj · ${d.mask_frame_count} frames · ${formatTimestamp(d.saved_at)}`}
                 actions={[
-                  {label:'Resume', icon:'▶', color:C.indigo, primary:true, onClick:() => handleResumeDraft(d)},
+                  {label: modelSelected ? 'Resume' : '🔒 Select Model First', icon:'▶', color: modelSelected ? C.indigo : 'rgba(255,255,255,0.2)', primary:true, onClick:() => handleResumeDraft(d)},
                   {label:'Delete', icon:'✕', color:C.red, danger:true, onClick:(e) => handleDeleteDraft(d.draft_id, e)},
                 ]}
               />
