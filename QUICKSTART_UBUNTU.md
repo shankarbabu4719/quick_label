@@ -6,16 +6,16 @@
 sudo apt update && sudo apt install -y python3.11 python3.11-venv python3-pip ffmpeg curl git build-essential
 ```
 
-## 2. Install Node.js 20
+## 2. Install Node.js 20 + yarn
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt install -y nodejs
 npm install -g yarn
 ```
 
-## 3. Clone project (HTTPS — no SSH key needed)
+## 3. Clone project (SSH key required — add your key to GitLab first)
 ```bash
-git clone https://gitlab.com/superuser.surveillance/sam2_labelme.git
+git clone git@gitlab.com:superuser.surveillance/sam2_labelme.git
 cd sam2_labelme
 git checkout ubuntu
 ```
@@ -26,7 +26,6 @@ python3.11 -m venv venv
 source venv/bin/activate
 pip install -e ".[demo]"
 ```
-> ⏳ This step downloads PyTorch (~2GB). Wait until it finishes.
 
 ## 5. Frontend setup
 ```bash
@@ -38,7 +37,5 @@ cd demo/frontend && yarn install && cd ../..
 chmod +x run-demo.sh
 ./run-demo.sh
 ```
-> ⏳ First run: model loads in ~30-60 seconds. Wait for "✅ Backend ready"
 
 ## ✅ Open browser: http://localhost:7262
-updated
