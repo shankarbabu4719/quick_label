@@ -183,8 +183,11 @@ export const uploadingStateAtom = atom<'default' | 'uploading' | 'error'>(
 );
 
 // #####################
-// Crop / Trim range
+// Object Labels (user-defined names)
 // #####################
+
+export const objectLabelsAtom = atom<Record<number, string>>({});
+// key: tracklet.id, value: custom label
 
 export type CropRange = {
   startFrame: number;

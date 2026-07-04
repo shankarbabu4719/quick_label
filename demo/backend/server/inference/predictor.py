@@ -478,12 +478,19 @@ class InferenceAPI:
             elif isinstance(inference_state, dict) and "num_frames" in inference_state:
                 num_frames = inference_state["num_frames"]
             
-            # Build export data
+            # Get object labels — use custom labels if set
+            custom_labels = session.get("object_labels", {})
             export_data = {
                 "session_id": session_id,
                 "video_path": session.get("video_path", ""),
                 "num_frames": num_frames,
-                "objects": [{"object_id": obj_id, "label": f"Object {obj_id}"} for obj_id in obj_ids],
+                "objects": [
+                    {
+                        "object_id": obj_id,
+                        "label": custom_labels.get(obj_id, f"Object {obj_id + 1}")
+                    }
+                    for obj_id in obj_ids
+                ],
                 "frames": []
             }
             
