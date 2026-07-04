@@ -1,95 +1,114 @@
 @echo off
 REM ============================================================
 REM  SAM2 Tracker — Windows Start Script
-REM  Requires: Python 3.11, Node 18+, yarn, ffmpeg
-REM  Run as: Double-click OR from Command Prompt
+REM  Double-click to run
 REM ============================================================
 
 setlocal EnableDelayedExpansion
 title SAM2 Tracker
 
 echo.
-echo  [34m==========================================[0m
-echo  [34m  SAM2 Tracker -- Windows[0m
-echo  [34m==========================================[0m
+echo ==========================================
+echo   SAM2 Tracker -- Windows
+echo ==========================================
 echo.
 
 REM ── Get project root ────────────────────────────────────────
 set "PROJECT_ROOT=%~dp0"
 cd /d "%PROJECT_ROOT%"
 
-REM ── Kill stale processes ─────────────────────────────────────
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq SAM2*" >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":7263"') do taskkill /F /PID %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":7262"') do taskkill /F /PID %%a >nul 2>&1
+REM ── Kill stale processes on ports ────────────────────────────
+echo Cleaning up old processes...
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7263 "') do (
+    if not "%%a"=="0" taskkill /F /PID %%a >nul 2>&1
+)
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7262 "') do (
+    if not "%%a"=="0" taskkill /F /PID %%a >nul 2>&1
+)
 
 REM ── Check Python ─────────────────────────────────────────────
 where python >nul 2>&1
 if errorlevel 1 (
-  echo [31m ERROR: Python not found![0m
-  echo    Install Python 3.11 from: https://www.python.org/downloads/
-  echo    Make sure to check "Add Python to PATH"
+  echo ERROR: Python not found!
+  echo   Install from: https://www.python.org/downloads/
+  echo   Check "Add Python to PATH" during install.
   pause
   exit /b 1
 )
+echo Python ... OK
 
 REM ── Check Node ───────────────────────────────────────────────
 where node >nul 2>&1
 if errorlevel 1 (
-  echo [31m ERROR: Node.js not found![0m
-  echo    Install from: https://nodejs.org/  (LTS version)
+  echo ERROR: Node.js not found!
+  echo   Install from: https://nodejs.org/
   pause
   exit /b 1
 )
+echo Node.js ... OK
 
 REM ── Check ffmpeg ─────────────────────────────────────────────
 where ffmpeg >nul 2>&1
 if errorlevel 1 (
-  echo [31m ERROR: ffmpeg not found![0m
-  echo    Install: winget install Gyan.FFmpeg
-  echo    OR download from: https://ffmpeg.org/download.html
+  echo ERROR: ffmpeg not found!
+  echo   Run: winget install Gyan.FFmpeg
   pause
   exit /b 1
 )
+echo ffmpeg ... OK
 
 REM ── Check yarn ───────────────────────────────────────────────
 where yarn >nul 2>&1
 if errorlevel 1 (
-  echo [33m Installing yarn...[0m
+  echo Installing yarn...
   npm install -g yarn
 )
+echo yarn ... OK
 
-REM ── Virtual environment (optional — use only if venv exists) ────────────
+REM ── Virtual environment (use only if venv exists) ────────────
 if exist "venv\Scripts\python.exe" (
+  echo Using venv...
   call venv\Scripts\activate.bat
 )
 
 REM ── Install Python deps if needed ────────────────────────────
 python -c "import sam2" >nul 2>&1
 if errorlevel 1 (
-  echo [33m Installing Python dependencies (first time ~5 min)...[0m
-  pip install -q -e "." strawberry-graphql[flask] flask-cors dataclasses-json imagesize tqdm pycocotools av hydra-core iopath decord
+  echo Installing Python dependencies - please wait...
+  pip install -e "." strawberry-graphql[flask] flask-cors dataclasses-json imagesize tqdm pycocotools av hydra-core iopath decord
+  if errorlevel 1 (
+    echo ERROR: pip install failed!
+    pause
+    exit /b 1
+  )
 )
+echo Python deps ... OK
 
 REM ── Checkpoints ──────────────────────────────────────────────
 if not exist "checkpoints\sam2.1_hiera_tiny.pt" (
-  echo [33m Downloading model checkpoints (~150MB)...[0m
-  cd checkpoints
-  bash download_ckpts.sh
-  cd ..
+  echo Downloading model checkpoint ~150MB - please wait...
+  python -c "import urllib.request; urllib.request.urlretrieve('https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt','checkpoints/sam2.1_hiera_tiny.pt'); print('Done')"
+  if errorlevel 1 (
+    echo ERROR: Checkpoint download failed!
+    pause
+    exit /b 1
+  )
 )
+echo Checkpoint ... OK
 
 REM ── Frontend deps ─────────────────────────────────────────────
 if not exist "demo\frontend\node_modules\" (
-  echo [33m Installing frontend dependencies...[0m
+  echo Installing frontend dependencies - please wait...
   cd demo\frontend
-  yarn install --silent
-  cd ..\..
+  yarn install
+  cd "%PROJECT_ROOT%"
 )
+echo Frontend deps ... OK
 
 REM ── Start backend ─────────────────────────────────────────────
-echo [32m Starting backend on port 7263...[0m
-cd demo\backend\server
+echo.
+echo Starting backend on port 7263...
+cd "%PROJECT_ROOT%demo\backend\server"
 
 set "SAM2_DEMO_FORCE_CPU_DEVICE=1"
 set "APP_ROOT=%PROJECT_ROOT%"
@@ -99,43 +118,57 @@ set "DATA_PATH=%PROJECT_ROOT%demo\data"
 set "DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4"
 set "SAM2_MAX_FRAMES=300"
 
-start /b "" python app.py > "%PROJECT_ROOT%backend.log" 2>&1
+start "SAM2-Backend" /min python app.py
 cd "%PROJECT_ROOT%"
 
 REM ── Wait for backend ─────────────────────────────────────────
-echo [33m Waiting for backend to be ready...[0m
+echo Waiting for backend to be ready...
 set /a TRIES=0
 :WAIT_LOOP
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 curl -s http://localhost:7263/healthy >nul 2>&1
 if not errorlevel 1 (
-  echo [32m Backend ready![0m
+  echo Backend is ready!
   goto BACKEND_READY
 )
 set /a TRIES+=1
-if !TRIES! lss 45 goto WAIT_LOOP
-echo [33m Backend still loading — continuing anyway...[0m
+echo   Waiting... attempt !TRIES!/30
+if !TRIES! lss 30 goto WAIT_LOOP
+echo Backend taking longer than expected - continuing anyway...
 
 :BACKEND_READY
 
 REM ── Start frontend ────────────────────────────────────────────
-echo [32m Starting frontend on port 7262...[0m
-cd demo\frontend
-start /b "" yarn dev --port 7262 > "%PROJECT_ROOT%frontend.log" 2>&1
+echo Starting frontend on port 7262...
+cd "%PROJECT_ROOT%demo\frontend"
+start "SAM2-Frontend" /min yarn dev --port 7262
 cd "%PROJECT_ROOT%"
 
-timeout /t 4 /nobreak >nul
+timeout /t 5 /nobreak >nul
 
 REM ── Open browser ──────────────────────────────────────────────
 start "" http://localhost:7262
 
 echo.
-echo  [32m===========================================[0m
-echo  [32m  SAM2 Tracker is running![0m
-echo  [32m  Open: http://localhost:7262[0m
-echo  [32m  Close this window to stop[0m
-echo  [32m===========================================[0m
+echo ==========================================
+echo   SAM2 Tracker is running!
+echo   Open: http://localhost:7262
+echo ==========================================
 echo.
-echo  Logs: backend.log / frontend.log
+echo   Backend log:  backend.log
+echo   Frontend log: frontend.log
 echo.
-pause
+echo   Press any key to STOP everything and exit.
+echo.
+pause >nul
+
+REM ── Cleanup on exit ──────────────────────────────────────────
+echo Stopping servers...
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7263 "') do (
+    if not "%%a"=="0" taskkill /F /PID %%a >nul 2>&1
+)
+for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":7262 "') do (
+    if not "%%a"=="0" taskkill /F /PID %%a >nul 2>&1
+)
+echo Done. Goodbye!
+timeout /t 2 /nobreak >nul
