@@ -17,7 +17,7 @@ import PrimaryCTAButton from '@/common/components/button/PrimaryCTAButton';
 import useDownloadVideo from '@/common/components/options/useDownloadVideo';
 import useVideo from '@/common/components/video/editor/useVideo';
 import Logger from '@/common/logger/Logger';
-import {cropRangeAtom, sessionAtom} from '@/demo/atoms';
+import {cropRangeAtom, objectLabelsAtom, sessionAtom, trackletObjectsAtom} from '@/demo/atoms';
 import {INFERENCE_API_ENDPOINT} from '@/demo/DemoConfig';
 import {ChevronRight} from '@carbon/icons-react';
 import {useAtomValue} from 'jotai';
@@ -31,6 +31,8 @@ export default function CloseSessionButton({onSessionClose}: Props) {
   const video = useVideo();
   const session = useAtomValue(sessionAtom);
   const cropRange = useAtomValue(cropRangeAtom);
+  const objectLabels = useAtomValue(objectLabelsAtom);
+  const tracklets = useAtomValue(trackletObjectsAtom);
   const {download} = useDownloadVideo();
   const [saving, setSaving] = useState(false);
 
@@ -39,6 +41,25 @@ export default function CloseSessionButton({onSessionClose}: Props) {
     setSaving(true);
 
     try {
+      // 0. Send custom object labels to backend before export
+      if (session != null && Object.keys(objectLabels).length > 0) {
+        try {
+          // Build labels map: {object_id: label_string}
+          const labelsMap: Record<string, string> = {};
+          tracklets.forEach(t => {
+            const customLabel = objectLabels[t.id];
+            if (customLabel) labelsMap[String(t.id)] = customLabel;
+          });
+          await fetch(`${INFERENCE_API_ENDPOINT}/update_labels/${session.id}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({labels: labelsMap}),
+          });
+        } catch (err) {
+          Logger.error('update_labels failed (non-fatal):', err);
+        }
+      }
+
       // 1. Trim video to crop range if set
       if (session != null && (cropRange.startFrame > 0 || cropRange.endFrame >= 0)) {
         try {

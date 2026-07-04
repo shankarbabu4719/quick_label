@@ -70,6 +70,7 @@ type ToolbarObjectContainerProps = PropsWithChildren<{
   subtitle: string;
   thumbnail: ReactNode;
   isMobile: boolean;
+  editableTitle?: ReactNode;
   onCancel?: () => void;
   onClick?: () => void;
 }>;
@@ -82,6 +83,7 @@ export default function ToolbarObjectContainer({
   subtitle,
   thumbnail,
   isMobile,
+  editableTitle,
   onClick,
   onCancel,
 }: ToolbarObjectContainerProps) {
@@ -105,7 +107,9 @@ export default function ToolbarObjectContainer({
       )}>
       {thumbnail}
       <div {...stylex.props(sharedStyles.rightColumn)}>
-        <div className="text-md font-semibold ml-2">{title}</div>
+        <div className="text-md font-semibold ml-2">
+          {editableTitle ?? title}
+        </div>
         {subtitle.length > 0 && (
           <div className="text-sm text-gray-400 leading-5 mt-2 ml-2">
             {subtitle}
