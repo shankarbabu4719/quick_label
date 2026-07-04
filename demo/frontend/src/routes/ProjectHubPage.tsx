@@ -79,7 +79,9 @@ function videoName(path: string): string {
 
 // ── Thumbnail ─────────────────────────────────────────────────────
 function VideoThumbnail({src}: {src: string | null}) {
-  if (!src) return (
+  const [error, setError] = useState(false);
+
+  if (!src || error) return (
     <div style={{
       width: '100%', height: '100%',
       display: 'flex', flexDirection: 'column',
@@ -95,6 +97,7 @@ function VideoThumbnail({src}: {src: string | null}) {
       src={src}
       style={{width: '100%', height: '100%', objectFit: 'cover'}}
       muted preload="metadata"
+      onError={() => setError(true)}
       onLoadedMetadata={e => { (e.target as HTMLVideoElement).currentTime = 0.1; }}
     />
   );
@@ -388,7 +391,7 @@ export default function ProjectHubPage() {
           <EmptyState text="No completed projects yet. Finish a project to see it here." />
         ) : (
           <CardGrid>
-            {projects.map(p => (
+            {projects.slice(0, 4).map(p => (
               <Card
                 key={p.name}
                 thumb={p.thumbnailUrl ? `http://localhost:7263/${p.thumbnailUrl}` : null}
