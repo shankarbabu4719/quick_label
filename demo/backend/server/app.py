@@ -440,12 +440,13 @@ def extract_frames(session_id: str) -> Response:
 
             # Derive a clean folder name from video filename
             video_stem = os.path.splitext(os.path.basename(str(video_file)))[0][:20]
-            folder_name = f"{video_stem}_frames_{int(fps)}fps"
+            folder_name = f"{video_stem}_frames_{int(effective_fps)}fps"
 
-            # Package frames into ZIP with folder structure + per-frame JSON
-            zip_path = os.path.join(tmpdir, f"{folder_name}.zip")
+            # Save frames directly to exports folder (no ZIP)
+            frames_output_dir = export_folder / folder_name
+            os.makedirs(frames_output_dir, exist_ok=True)
 
-            # Load tracking JSON if available
+            # Copy PNG frames + write per-frame JSON
             tracking_data = {}
             tracking_json_path = export_folder / "tracking.json"
             if tracking_json_path.exists():
@@ -461,35 +462,42 @@ def extract_frames(session_id: str) -> Response:
                 except Exception as e:
                     logger.warning(f"Could not load tracking.json: {e}")
 
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                frame_files = sorted(os.listdir(frames_dir))
-                source_fps = 30.0  # assumed source FPS for frame index mapping
-                for i, fname in enumerate(frame_files):
-                    if not fname.endswith(".png"):
-                        continue
-                    # Add image inside folder
-                    zf.write(os.path.join(frames_dir, fname), f"{folder_name}/{fname}")
+            frame_files = sorted(os.listdir(frames_dir))
+            source_fps_val = 30.0
+            saved_files = []
+            for i, fname in enumerate(frame_files):
+                if not fname.endswith(".png"):
+                    continue
+                # Copy PNG to output dir
+                src = os.path.join(frames_dir, fname)
+                dst = frames_output_dir / fname
+                import shutil as _shutil
+                _shutil.copy2(src, dst)
+                saved_files.append(fname)
 
-                    # Add per-frame JSON inside same folder
-                    source_frame_idx = int(round(
-                        (start_frame or 0) + i * (source_fps / fps)
-                    ))
-                    json_fname = os.path.splitext(fname)[0] + ".json"
-                    frame_json = tracking_data.get(source_frame_idx, {
-                        "frame_index": source_frame_idx,
-                        "objects": [],
-                        "masks": [],
-                        "note": "No mask data for this frame",
-                    })
-                    zf.writestr(f"{folder_name}/{json_fname}", json.dumps(frame_json, indent=2))
+                # Write per-frame JSON
+                source_frame_idx = int(round(
+                    (start_frame or 0) + i * (source_fps_val / effective_fps)
+                ))
+                json_fname = os.path.splitext(fname)[0] + ".json"
+                frame_json = tracking_data.get(source_frame_idx, {
+                    "frame_index": source_frame_idx,
+                    "objects": [],
+                    "masks": [],
+                    "note": "No mask data for this frame",
+                })
+                with open(frames_output_dir / json_fname, "w", encoding="utf-8") as jf:
+                    json.dump(frame_json, jf, indent=2)
 
-            with open(zip_path, "rb") as f:
-                zip_data = f.read()
+            logger.info(f"Saved {len(saved_files)} frames to {frames_output_dir}")
 
-        response = make_response(zip_data)
-        response.headers["Content-Type"] = "application/zip"
-        response.headers["Content-Disposition"] = f"attachment; filename={folder_name}.zip"
-        return response
+        return make_response({
+            "success": True,
+            "folder": str(frames_output_dir),
+            "folder_name": folder_name,
+            "frame_count": len(saved_files),
+            "fps": effective_fps,
+        }, 200)
 
     except RuntimeError as e:
         return make_response({"error": str(e)}, 404)
