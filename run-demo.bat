@@ -65,10 +65,15 @@ if errorlevel 1 (
 )
 echo yarn ... OK
 
-REM ── Virtual environment (use only if venv exists) ────────────
+REM ── Virtual environment (use only if venv exists AND has packages) ────────
 if exist "venv\Scripts\python.exe" (
-  echo Using venv...
-  call venv\Scripts\activate.bat
+  venv\Scripts\python.exe -c "import strawberry" >nul 2>&1
+  if not errorlevel 1 (
+    echo Using venv...
+    call venv\Scripts\activate.bat
+  ) else (
+    echo Venv found but packages missing - using global Python...
+  )
 )
 
 REM ── Install Python deps if needed ────────────────────────────
