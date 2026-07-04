@@ -36,6 +36,7 @@ const styles = stylex.create({
       default: 'clip',
       '@media screen and (max-width: 768px)': 'visible',
     },
+    backgroundColor: '#12141A',
   },
   videoContainer: {
     position: 'relative',
@@ -43,6 +44,9 @@ const styles = stylex.create({
     overflow: 'hidden',
     width: '100%',
     maxWidth: MAX_VIDEO_WIDTH,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   layers: {
     position: 'absolute',

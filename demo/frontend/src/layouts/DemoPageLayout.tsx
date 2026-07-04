@@ -26,8 +26,8 @@ const styles = stylex.create({
     display: 'flex',
     justifyContent: 'stretch',
     alignItems: 'stretch',
-    gap: spacing[6],
-    paddingHorizontal: spacing[6],
+    gap: spacing[4],
+    paddingHorizontal: spacing[4],
     paddingVertical: spacing[3],
     '@media screen and (max-width: 768px)': {
       display: 'flex',

@@ -1,17 +1,6 @@
 /**
  * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Licensed under the Apache License, Version 2.0
  */
 import ObjectActions from '@/common/components/annotations/ObjectActions';
 import ObjectPlaceholder from '@/common/components/annotations/ObjectPlaceholder';
@@ -20,8 +9,9 @@ import ToolbarObjectContainer from '@/common/components/annotations/ToolbarObjec
 import useVideo from '@/common/components/video/editor/useVideo';
 import {BaseTracklet} from '@/common/tracker/Tracker';
 import emptyFunction from '@/common/utils/emptyFunction';
-import {activeTrackletObjectIdAtom} from '@/demo/atoms';
-import {useSetAtom} from 'jotai';
+import {activeTrackletObjectIdAtom, objectLabelsAtom} from '@/demo/atoms';
+import {useAtom, useSetAtom} from 'jotai';
+import {useRef, useState} from 'react';
 
 type Props = {
   label: string;
@@ -42,6 +32,12 @@ export default function ToolbarObject({
 }: Props) {
   const video = useVideo();
   const setActiveTrackletId = useSetAtom(activeTrackletObjectIdAtom);
+  const [objectLabels, setObjectLabels] = useAtom(objectLabelsAtom);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const displayLabel = objectLabels[tracklet.id] ?? label;
 
   async function handleCancelNewObject() {
     try {
@@ -52,6 +48,70 @@ export default function ToolbarObject({
       setActiveTrackletId(null);
     }
   }
+
+  function handleStartEdit(e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditValue(displayLabel);
+    setEditing(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  }
+
+  function handleSaveEdit() {
+    const trimmed = editValue.trim();
+    if (trimmed) {
+      setObjectLabels(prev => ({...prev, [tracklet.id]: trimmed}));
+    }
+    setEditing(false);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') handleSaveEdit();
+    if (e.key === 'Escape') setEditing(false);
+  }
+
+  // Editable title element
+  const editableTitle = editing ? (
+    <input
+      ref={inputRef}
+      value={editValue}
+      onChange={e => setEditValue(e.target.value)}
+      onBlur={handleSaveEdit}
+      onKeyDown={handleKeyDown}
+      onClick={e => e.stopPropagation()}
+      autoFocus
+      style={{
+        background: 'rgba(99,102,241,0.15)',
+        border: '1px solid rgba(99,102,241,0.4)',
+        borderRadius: 6,
+        color: '#F0F2F7',
+        fontSize: 13,
+        fontWeight: 600,
+        padding: '2px 8px',
+        outline: 'none',
+        width: '100%',
+        maxWidth: 140,
+        fontFamily: 'inherit',
+      }}
+    />
+  ) : (
+    <span
+      title="Click to rename"
+      onDoubleClick={handleStartEdit}
+      style={{
+        cursor: 'text',
+        borderRadius: 4,
+        padding: '1px 4px',
+        transition: 'background 0.15s',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.07)')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+      {displayLabel}
+      <span style={{fontSize: 10, opacity: 0.35}}>✎</span>
+    </span>
+  );
 
   if (!tracklet.isInitialized) {
     return (
@@ -72,8 +132,9 @@ export default function ToolbarObject({
     <ToolbarObjectContainer
       isActive={isActive}
       onClick={onClick}
-      title={label}
+      title={displayLabel}
       subtitle=""
+      editableTitle={editableTitle}
       thumbnail={
         <ObjectThumbnail
           thumbnail={tracklet.thumbnail}
