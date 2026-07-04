@@ -399,10 +399,38 @@ def extract_frames(session_id: str) -> Response:
             frames_dir = os.path.join(tmpdir, "frames")
             os.makedirs(frames_dir)
 
-            # Build ffmpeg command to extract frames at given FPS
-            # Note: video is already trimmed to crop range — extract all frames
+            # Get actual video frame count and fps to determine extraction rate
+            ffprobe_cmd = [ffmpeg.replace("ffmpeg", "ffprobe") if "ffprobe" not in ffmpeg else ffprobe_path,
+                          "-v", "quiet", "-show_entries", "stream=nb_frames,r_frame_rate,duration",
+                          "-select_streams", "v:0", "-of", "json", str(video_file)]
+            try:
+                import shutil as sh
+                ffprobe_path = sh.which("ffprobe") or ffmpeg.replace("ffmpeg", "ffprobe")
+                ffprobe_result = subprocess.run(
+                    [ffprobe_path, "-v", "quiet", "-show_entries",
+                     "stream=nb_frames,r_frame_rate,duration",
+                     "-select_streams", "v:0", "-of", "json", str(video_file)],
+                    capture_output=True, text=True
+                )
+                import json as _json
+                probe_data = _json.loads(ffprobe_result.stdout)
+                stream = probe_data.get("streams", [{}])[0]
+                video_duration = float(stream.get("duration", 1.0))
+                # If video is shorter than 1/fps, extract at source fps instead
+                if video_duration < 1.0 / fps:
+                    # Extract all frames from the source
+                    src_fps_str = stream.get("r_frame_rate", "24/1")
+                    num, den = src_fps_str.split("/")
+                    effective_fps = float(num) / float(den)
+                    logger.info(f"Video too short ({video_duration:.3f}s) for {fps}fps, using source fps {effective_fps}")
+                else:
+                    effective_fps = fps
+            except Exception:
+                effective_fps = fps
+
+            # Build ffmpeg command to extract frames
             cmd = [ffmpeg, "-y", "-i", str(video_file),
-                   "-vf", f"fps={fps}",
+                   "-vf", f"fps={effective_fps}",
                    os.path.join(frames_dir, "frame_%06d.png")]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -410,8 +438,12 @@ def extract_frames(session_id: str) -> Response:
                 logger.error(f"ffmpeg extract failed: {result.stderr}")
                 return make_response({"error": "Failed to extract frames"}, 500)
 
-            # Package frames into ZIP + per-frame JSON from tracking data
-            zip_path = os.path.join(tmpdir, "frames.zip")
+            # Derive a clean folder name from video filename
+            video_stem = os.path.splitext(os.path.basename(str(video_file)))[0][:20]
+            folder_name = f"{video_stem}_frames_{int(fps)}fps"
+
+            # Package frames into ZIP with folder structure + per-frame JSON
+            zip_path = os.path.join(tmpdir, f"{folder_name}.zip")
 
             # Load tracking JSON if available
             tracking_data = {}
@@ -420,7 +452,6 @@ def extract_frames(session_id: str) -> Response:
                 try:
                     with open(tracking_json_path, "r", encoding="utf-8") as tf:
                         td = json.load(tf)
-                    # Build a map: frame_index → masks data
                     for frame in td.get("frames", []):
                         tracking_data[frame["frame_index"]] = {
                             "frame_index": frame["frame_index"],
@@ -434,12 +465,12 @@ def extract_frames(session_id: str) -> Response:
                 frame_files = sorted(os.listdir(frames_dir))
                 source_fps = 30.0  # assumed source FPS for frame index mapping
                 for i, fname in enumerate(frame_files):
-                    # Add image frame
-                    zf.write(os.path.join(frames_dir, fname), fname)
+                    if not fname.endswith(".png"):
+                        continue
+                    # Add image inside folder
+                    zf.write(os.path.join(frames_dir, fname), f"{folder_name}/{fname}")
 
-                    # Add per-frame JSON
-                    # Map extracted frame index back to source frame index
-                    # frame i at fps X corresponds to source frame ~ i * (source_fps / fps)
+                    # Add per-frame JSON inside same folder
                     source_frame_idx = int(round(
                         (start_frame or 0) + i * (source_fps / fps)
                     ))
@@ -450,14 +481,14 @@ def extract_frames(session_id: str) -> Response:
                         "masks": [],
                         "note": "No mask data for this frame",
                     })
-                    zf.writestr(json_fname, json.dumps(frame_json, indent=2))
+                    zf.writestr(f"{folder_name}/{json_fname}", json.dumps(frame_json, indent=2))
 
             with open(zip_path, "rb") as f:
                 zip_data = f.read()
 
         response = make_response(zip_data)
         response.headers["Content-Type"] = "application/zip"
-        response.headers["Content-Disposition"] = f"attachment; filename=frames_{fps}fps.zip"
+        response.headers["Content-Disposition"] = f"attachment; filename={folder_name}.zip"
         return response
 
     except RuntimeError as e:
