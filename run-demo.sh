@@ -45,9 +45,8 @@ fi
 OS="$(uname -s)"
 if [ "$OS" = "Darwin" ]; then
   # macOS: disable fork safety + MPS fallback
-  # Use MPS (Apple GPU) for better performance — remove FORCE_CPU
-  EXTRA_ENV="OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES PYTORCH_ENABLE_MPS_FALLBACK=1 MallocStackLogging=0"
-  echo "🍎 macOS detected (MPS GPU mode)"
+  EXTRA_ENV="OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES PYTORCH_ENABLE_MPS_FALLBACK=1"
+  echo "🍎 macOS detected"
 else
   # Linux/Ubuntu: no macOS-specific flags needed
   EXTRA_ENV=""
@@ -59,6 +58,7 @@ echo "🔧 Starting backend on http://localhost:7263 (tiny model, CPU mode)..."
 cd demo/backend/server
 
 env $EXTRA_ENV \
+  SAM2_DEMO_FORCE_CPU_DEVICE=1 \
   APP_ROOT="$PROJECT_ROOT/" \
   API_URL=http://localhost:7263 \
   MODEL_SIZE=tiny \
