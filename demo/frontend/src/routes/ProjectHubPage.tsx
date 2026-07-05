@@ -139,8 +139,27 @@ export default function ProjectHubPage() {
         fetch('http://localhost:7263/list_drafts'),
       ]);
       const ed = await er.json(); const dd = await dr.json();
-      setProjects(ed.exports || []); setDrafts(dd.drafts || []);
-    } catch(e) { Logger.error(e); } finally { setLoading(false); }
+      const exps = ed.exports || [];
+      const drs = dd.drafts || [];
+      setProjects(exps);
+      setDrafts(drs);
+      // Cache to localStorage
+      try {
+        localStorage.setItem('sam2_projects', JSON.stringify(exps));
+        localStorage.setItem('sam2_drafts', JSON.stringify(drs));
+      } catch {}
+    } catch(e) {
+      Logger.error(e);
+      // Load from cache if backend is down
+      try {
+        const cached = localStorage.getItem('sam2_projects');
+        const cachedDrafts = localStorage.getItem('sam2_drafts');
+        if (cached) setProjects(JSON.parse(cached));
+        if (cachedDrafts) setDrafts(JSON.parse(cachedDrafts));
+      } catch {}
+    } finally {
+      setLoading(false);
+    }
   }
 
   const fetchDrafts = useCallback(async () => {

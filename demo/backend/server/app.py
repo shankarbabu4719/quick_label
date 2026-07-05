@@ -117,21 +117,41 @@ def send_uploaded_video(path: str):
         raise ValueError("resource not found")
 
 
-def _get_session_export_folder(session_id: str) -> Path:
+def _get_session_export_folder(session_id: str, create_new: bool = False) -> Path:
     """
     Get (and create) the export folder for a session.
+    - create_new=True: creates a new folder (on first export_session call)
+    - create_new=False: returns the already-assigned folder for this session
     Folder name = video filename without extension.
-    e.g. exports/my_video/
+    If folder already exists on create_new, append _2, _3, etc.
     """
     import re
     session = inference_api._InferenceAPI__get_session(session_id)
+
+    # Return cached folder if already assigned
+    if "export_folder" in session and not create_new:
+        folder = Path(session["export_folder"])
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
     video_path = session.get("video_path", "")
-    # Extract filename without extension as folder name
     raw_name = os.path.splitext(os.path.basename(video_path))[0]
-    # Keep only safe characters, truncate to 40 chars
     safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_name)[:40] or "export"
-    export_folder = EXPORTS_PATH / safe_name
+
+    if create_new:
+        # Find unique folder name
+        export_folder = EXPORTS_PATH / safe_name
+        if export_folder.exists():
+            counter = 2
+            while (EXPORTS_PATH / f"{safe_name}_{counter}").exists():
+                counter += 1
+            export_folder = EXPORTS_PATH / f"{safe_name}_{counter}"
+    else:
+        export_folder = EXPORTS_PATH / safe_name
+
     os.makedirs(export_folder, exist_ok=True)
+    # Cache folder in session so save_masked_video uses same folder
+    session["export_folder"] = str(export_folder)
     return export_folder
 
 
@@ -149,7 +169,7 @@ def export_session(session_id: str) -> Response:
             export_data = inference_api.export_session(
                 session_id, start_frame=start_frame, end_frame=end_frame
             )
-            export_folder = _get_session_export_folder(session_id)
+            export_folder = _get_session_export_folder(session_id, create_new=True)
 
             # 1. Save tracking JSON
             json_path = export_folder / "tracking.json"
@@ -248,7 +268,7 @@ def save_masked_video(session_id: str) -> Response:
     into the session's export folder as masked.mp4
     """
     try:
-        export_folder = _get_session_export_folder(session_id)
+        export_folder = _get_session_export_folder(session_id, create_new=False)
         masked_path = export_folder / "masked.mp4"
         with open(masked_path, "wb") as f:
             f.write(request.data)
