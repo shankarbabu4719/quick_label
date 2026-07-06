@@ -46,7 +46,7 @@ class InferenceAPI:
         super(InferenceAPI, self).__init__()
 
         self.session_states: Dict[str, Any] = {}
-        self.score_thresh = 0
+        self.score_thresh = 0.0  # SAM2 default; masks below this score are empty
 
         if MODEL_SIZE == "tiny":
             checkpoint = Path(APP_ROOT) / "checkpoints/sam2.1_hiera_tiny.pt"
