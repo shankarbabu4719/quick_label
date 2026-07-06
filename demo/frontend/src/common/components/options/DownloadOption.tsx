@@ -27,10 +27,11 @@ export default function DownloadOption() {
     const file = await download(true);
     if (session?.id && file) {
       try {
+        const blob = new Blob([file], {type: 'video/mp4'});
         await fetch(`http://localhost:7263/save_masked_video/${session.id}`, {
           method: 'POST',
           headers: {'Content-Type': 'video/mp4'},
-          body: file,
+          body: blob,
         });
       } catch (e) {
         console.warn('Could not save masked video to server:', e);

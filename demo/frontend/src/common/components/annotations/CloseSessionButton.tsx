@@ -96,10 +96,11 @@ export default function CloseSessionButton({onSessionClose}: Props) {
         try {
           const file = await download(false); // encode without downloading to browser
           if (file) {
+            const blob = new Blob([file], {type: 'video/mp4'});
             await fetch(`${INFERENCE_API_ENDPOINT}/save_masked_video/${session.id}`, {
               method: 'POST',
               headers: {'Content-Type': 'video/mp4'},
-              body: file,
+              body: blob,
             });
           }
         } catch (err) {
