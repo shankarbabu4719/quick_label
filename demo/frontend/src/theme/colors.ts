@@ -23,4 +23,5 @@ export const THEME_COLORS = [
   '#FA8719',
   '#E6193B',
   '#FA7DC8',
+  '#A0FF50',
 ];
