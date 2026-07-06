@@ -395,7 +395,7 @@ export default function ProjectHubPage() {
               {isUploading ? 'Uploading your video...' : error ? `Upload failed: ${error}` : 'Drop your video here'}
             </div>
             <div style={{fontSize:13, color:C.textDim}}>
-              or <span style={{color:C.indigo, fontWeight:600}}>click to browse</span> · {MAX_UPLOAD_FILE_SIZE} max · MP4 / MOV · up to 2 min
+              or <span style={{color:C.indigo, fontWeight:600}}>click to browse</span> · {MAX_UPLOAD_FILE_SIZE} max · MP4 / MOV · up to 5 minutes
             </div>
           </div>
           </>
