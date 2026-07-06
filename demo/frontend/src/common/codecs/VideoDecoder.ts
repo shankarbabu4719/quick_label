@@ -131,9 +131,9 @@ function decodeInternal(
               timestamp: inputFrame.timestamp,
               duration,
             });
-            // Sort frames in order of timestamp. This is needed because Safari
+            // Sort frames in ascending order of timestamp. This is needed because Safari
             // can return decoded frames out of order.
-            imageFrames.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+            imageFrames.sort((a, b) => (a.timestamp > b.timestamp ? 1 : -1));
             // Update progress on first frame and then every 40th frame
             if (onProgress != null && frame_n % 100 === 0) {
               onProgress({
