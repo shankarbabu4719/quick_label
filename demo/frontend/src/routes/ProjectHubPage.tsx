@@ -49,6 +49,7 @@ type ExportProject = {
   hasOriginal: boolean;
   hasMasked: boolean;
   thumbnailUrl: string | null;
+  displayName?: string;
 };
 
 type DraftProject = {
@@ -414,7 +415,7 @@ export default function ProjectHubPage() {
               <Card
                 key={p.name}
                 thumb={p.thumbnailUrl ? `http://localhost:7263/${p.thumbnailUrl}` : null}
-                name={p.name.slice(0, 20) + (p.name.length > 20 ? '...' : '')}
+                name={p.displayName || (p.name.slice(0, 16) + '...')}
                 badge="Complete" badgeColor={C.green}
                 actions={p.hasJson ? [{label:'Download JSON', icon:'↓', color:C.indigo, onClick:() => handleDownloadJSON(p.name)}] : []}
               />

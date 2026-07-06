@@ -47,6 +47,23 @@ def healthy() -> Response:
     return make_response("OK", 200)
 
 
+@app.route("/session_progress/<session_id>", methods=["GET"])
+def session_progress(session_id: str) -> Response:
+    """Return session loading progress (0.0 to 1.0)"""
+    try:
+        session = inference_api._InferenceAPI__get_session(session_id)
+        state = session.get("state", {})
+        num_frames = state.get("num_frames", 0) if isinstance(state, dict) else getattr(state, "num_frames", 0)
+        loaded = session.get("frames_loaded", num_frames)
+        progress = min(1.0, loaded / num_frames) if num_frames > 0 else 0.0
+        return make_response({"progress": progress, "num_frames": num_frames, "loaded": loaded}, 200)
+    except RuntimeError:
+        # Session loading or not found
+        return make_response({"progress": 0.0, "num_frames": 0, "loaded": 0}, 200)
+    except Exception as e:
+        return make_response({"progress": 0.0, "error": str(e)}, 200)
+
+
 @app.route("/get_model", methods=["GET"])
 def get_model() -> Response:
     """Return current model size."""
@@ -308,7 +325,29 @@ def list_exports() -> Response:
                 "hasOriginal": (folder / "original.mp4").exists(),
                 "hasMasked": (folder / "masked.mp4").exists(),
                 "thumbnailUrl": None,
+                "displayName": None,
             }
+
+            # Get display name from tracking.json video_path
+            json_path = folder / "tracking.json"
+            if json_path.exists():
+                try:
+                    import json as _json
+                    with open(json_path, "r") as jf:
+                        td = _json.load(jf)
+                    vp = td.get("video_path", "")
+                    if vp:
+                        base = os.path.splitext(os.path.basename(vp))[0]
+                        # If it looks like a hash (long hex), use folder name truncated
+                        if len(base) > 20 and all(c in '0123456789abcdef' for c in base.lower()):
+                            export_info["displayName"] = f"Project {folder.name[:8]}..."
+                        else:
+                            export_info["displayName"] = base[:30]
+                except Exception:
+                    pass
+
+            if export_info["displayName"] is None:
+                export_info["displayName"] = f"Project {folder.name[:8]}..."
 
             # Generate thumbnail URL if original video exists
             if export_info["hasOriginal"]:
