@@ -114,7 +114,7 @@ set "API_URL=http://localhost:7263"
 set "MODEL_SIZE=tiny"
 set "DATA_PATH=%PROJECT_ROOT%\demo\data"
 set "DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4"
-set "SAM2_MAX_FRAMES=300"
+set "SAM2_MAX_FRAMES=400"
 REM Use all CPU threads for faster ffmpeg transcoding
 for /f "tokens=2 delims==" %%a in ('wmic cpu get NumberOfLogicalProcessors /value 2^>nul') do set "FFMPEG_NUM_THREADS=%%a"
 if not defined FFMPEG_NUM_THREADS set "FFMPEG_NUM_THREADS=4"

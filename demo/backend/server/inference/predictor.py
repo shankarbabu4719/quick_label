@@ -135,6 +135,16 @@ class InferenceAPI:
             labels = request.labels
             clear_old_points = request.clear_old_points
 
+            # Clamp frame_idx to loaded frames to avoid IndexError
+            # when SAM2_MAX_FRAMES limits how many frames were loaded
+            num_loaded_frames = inference_state["images"].shape[0]
+            if frame_idx >= num_loaded_frames:
+                frame_idx = num_loaded_frames - 1
+                logger.warning(
+                    f"frame_idx {request.frame_index} out of range "
+                    f"(loaded={num_loaded_frames}), clamped to {frame_idx}"
+                )
+
             # add new prompts and instantly get the output on the same frame
             frame_idx, object_ids, masks = self.predictor.add_new_points_or_box(
                 inference_state=inference_state,

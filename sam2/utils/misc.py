@@ -288,8 +288,8 @@ def load_video_frames_from_video_file(
     """Load the video frames from a video file."""
     import decord
 
-    # Limit max frames to avoid OOM on CPU — env var SAM2_MAX_FRAMES (default 300)
-    max_frames = int(os.environ.get("SAM2_MAX_FRAMES", "300"))
+    # Limit max frames to avoid OOM on CPU — env var SAM2_MAX_FRAMES (default 400)
+    max_frames = int(os.environ.get("SAM2_MAX_FRAMES", "400"))
 
     img_mean = torch.tensor(img_mean, dtype=torch.float32)[:, None, None]
     img_std = torch.tensor(img_std, dtype=torch.float32)[:, None, None]
