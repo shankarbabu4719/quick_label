@@ -41,5 +41,4 @@ export const DEFAULT_EFFECT_LAYERS: EffectLayers = {
   highlight: 'Overlay',
 };
 
-export const MAX_UPLOAD_FILE_SIZE = '200MB';
-export const MAX_UPLOAD_DURATION_SEC = 30;
+export const MAX_UPLOAD_FILE_SIZE = '250MB';

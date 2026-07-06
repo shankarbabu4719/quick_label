@@ -1,2 +1,4 @@
 data/uploads
 data/posters
+data/drafts/*.json
+data/exports/

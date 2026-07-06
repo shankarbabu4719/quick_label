@@ -22,8 +22,8 @@ FFMPEG_NUM_THREADS = int(os.getenv("FFMPEG_NUM_THREADS", str(os.cpu_count() or 4
 # Path for all data used in API
 DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
 
-# Max duration an uploaded video can have in seconds.
-# Keep short to prevent RAM exhaustion on CPU mode
+# Max duration an uploaded video can have in seconds. The default is 120
+# seconds (2 minutes). User can upload longer videos for object tracking.
 MAX_UPLOAD_VIDEO_DURATION = float(os.environ.get("MAX_UPLOAD_VIDEO_DURATION", "300"))
 
 # If set, it will define which video is returned by the default video query for
