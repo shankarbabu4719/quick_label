@@ -1,0 +1,14 @@
+{
+  "draft_id": "draft_1783309972088",
+  "session_id": "fc41a601-10af-4f2e-8042-65988d5746b4",
+  "video_path": "uploads/21826caf34392737fcdf92c6ddce9eb6a20384984935b92f625010f12efab0c6.mp4",
+  "video_url": "http://localhost:7263/uploads/21826caf34392737fcdf92c6ddce9eb6a20384984935b92f625010f12efab0c6.mp4",
+  "objects": [
+    {
+      "object_id": 0,
+      "label": "Object 0"
+    }
+  ],
+  "masks_per_frame": {},
+  "saved_at": 1783309972088
+}
