@@ -17,7 +17,7 @@ MODEL_SIZE = os.getenv("MODEL_SIZE", "base_plus")
 
 logger.info(f"using model size {MODEL_SIZE}")
 
-FFMPEG_NUM_THREADS = int(os.getenv("FFMPEG_NUM_THREADS", "1"))
+FFMPEG_NUM_THREADS = int(os.getenv("FFMPEG_NUM_THREADS", str(os.cpu_count() or 4)))
 
 # Path for all data used in API
 DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
