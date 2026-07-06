@@ -39,28 +39,23 @@ def transcode(
     seek_t: float,
     duration_time_sec: float,
 ):
-    codec = os.environ.get("VIDEO_ENCODE_CODEC", "libx264")
-    crf = int(os.environ.get("VIDEO_ENCODE_CRF", "23"))
+    codec   = os.environ.get("VIDEO_ENCODE_CODEC",   "libx264")
+    crf     = int(os.environ.get("VIDEO_ENCODE_CRF", "23"))
+    max_w   = int(os.environ.get("VIDEO_ENCODE_MAX_WIDTH",  "1280"))
+    max_h   = int(os.environ.get("VIDEO_ENCODE_MAX_HEIGHT", "720"))
     verbose = ast.literal_eval(os.environ.get("VIDEO_ENCODE_VERBOSE", "False"))
 
-    # Auto-adjust fps and resolution based on video duration
-    # to prevent RAM exhaustion on longer videos
-    if duration_time_sec <= 30:
-        fps   = int(os.environ.get("VIDEO_ENCODE_FPS",        "24"))
-        max_w = int(os.environ.get("VIDEO_ENCODE_MAX_WIDTH",  "1280"))
-        max_h = int(os.environ.get("VIDEO_ENCODE_MAX_HEIGHT", "720"))
-    elif duration_time_sec <= 60:
-        fps   = 15;  max_w = 854;  max_h = 480
-    elif duration_time_sec <= 120:
-        fps   = 10;  max_w = 640;  max_h = 360
-    else:
-        # 2-5 minutes — most compressed
-        fps   = 8;   max_w = 640;  max_h = 360
+    # Auto-calculate fps so total frames ≤ MAX_FRAMES
+    # This keeps SAM2 session start fast regardless of video length
+    # without reducing visual quality (just sampling rate)
+    MAX_FRAMES = int(os.environ.get("VIDEO_ENCODE_MAX_FRAMES", "900"))
+    base_fps   = int(os.environ.get("VIDEO_ENCODE_FPS", "24"))
 
-    # Further reduce if source video is very high resolution
-    if in_metadata is not None and in_metadata.width and in_metadata.width > 1920:
-        max_w = min(max_w, 854)
-        max_h = min(max_h, 480)
+    if duration_time_sec > 0:
+        ideal_fps = MAX_FRAMES / duration_time_sec
+        fps = max(4, min(base_fps, int(ideal_fps)))   # clamp 4–24 fps
+    else:
+        fps = base_fps
 
     normalize_video(
         in_path=in_path,
