@@ -384,6 +384,134 @@ def send_exported_file(path: str):
 
 
 # ---------------------------------------------------------------------------
+# EXTRACT FRAMES — extract frames from a completed export project
+# ---------------------------------------------------------------------------
+
+@app.route("/extract_frames/<project_name>", methods=["POST"])
+def extract_frames(project_name: str) -> Response:
+    """
+    Extract frames from a completed export project's original.mp4.
+    Body JSON: { "fps": float, "source": "original" | "masked" }
+    - fps: frames per second to extract (default 1.0)
+    - source: which video to extract from (default "original")
+    Saves frames to exports/<project_name>/frames_<fps>fps_<source>/
+    Returns: { "success": bool, "frames_dir": str, "frame_count": int }
+    """
+    import json, shutil, subprocess
+
+    try:
+        body = request.get_json(force=True) or {}
+        fps = float(body.get("fps", 1.0))
+        source = body.get("source", "original")
+
+        # Validate project folder
+        project_folder = EXPORTS_PATH / project_name
+        if not project_folder.exists() or not project_folder.is_dir():
+            return make_response({"error": "Project not found"}, 404)
+
+        # Pick source video
+        if source == "masked":
+            video_path = project_folder / "masked.mp4"
+            if not video_path.exists():
+                return make_response({"error": "masked.mp4 not found for this project"}, 404)
+        else:
+            video_path = project_folder / "original.mp4"
+            if not video_path.exists():
+                return make_response({"error": "original.mp4 not found for this project"}, 404)
+
+        # Create output folder — name includes fps + source
+        fps_label = str(fps).rstrip('0').rstrip('.') if '.' in str(fps) else str(fps)
+        frames_dir_name = f"frames_{fps_label}fps_{source}"
+        frames_dir = project_folder / frames_dir_name
+
+        # If already extracted, return existing count
+        if frames_dir.exists():
+            existing = list(frames_dir.glob("*.jpg"))
+            if existing:
+                return make_response({
+                    "success": True,
+                    "frames_dir": frames_dir_name,
+                    "frame_count": len(existing),
+                    "already_exists": True,
+                }, 200)
+
+        os.makedirs(frames_dir, exist_ok=True)
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return make_response({"error": "ffmpeg not found on this system"}, 500)
+
+        # Extract frames: ffmpeg -i video.mp4 -vf fps=N frame_%06d.jpg
+        output_pattern = str(frames_dir / "frame_%06d.jpg")
+        cmd = [
+            ffmpeg, "-y",
+            "-i", str(video_path),
+            "-vf", f"fps={fps}",
+            "-q:v", "2",          # JPEG quality (2 = high)
+            "-threads", "2",
+            output_pattern,
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            # Clean up empty folder
+            try:
+                frames_dir.rmdir()
+            except Exception:
+                pass
+            logger.error(f"ffmpeg extract_frames failed: {result.stderr}")
+            return make_response({"error": "Frame extraction failed", "details": result.stderr[-500:]}, 500)
+
+        frame_count = len(list(frames_dir.glob("*.jpg")))
+        logger.info(f"Extracted {frame_count} frames to {frames_dir}")
+
+        return make_response({
+            "success": True,
+            "frames_dir": frames_dir_name,
+            "frame_count": frame_count,
+            "already_exists": False,
+        }, 200)
+
+    except subprocess.TimeoutExpired:
+        return make_response({"error": "Frame extraction timed out (>5 min)"}, 500)
+    except Exception as e:
+        logger.error(f"Error extracting frames for {project_name}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/frames_status/<project_name>", methods=["GET"])
+def frames_status(project_name: str) -> Response:
+    """
+    List all extracted frame folders for a project.
+    Returns: { "extractions": [{ "dir": str, "frame_count": int, "fps": str, "source": str }] }
+    """
+    try:
+        project_folder = EXPORTS_PATH / project_name
+        if not project_folder.exists():
+            return make_response({"extractions": []}, 200)
+
+        extractions = []
+        for d in project_folder.iterdir():
+            if d.is_dir() and d.name.startswith("frames_"):
+                frames = list(d.glob("*.jpg"))
+                # Parse fps and source from folder name: frames_1fps_original
+                parts = d.name.split("_")  # ['frames', '1fps', 'original']
+                fps_str = parts[1].replace("fps", "") if len(parts) > 1 else "?"
+                source_str = parts[2] if len(parts) > 2 else "original"
+                extractions.append({
+                    "dir": d.name,
+                    "frame_count": len(frames),
+                    "fps": fps_str,
+                    "source": source_str,
+                })
+
+        extractions.sort(key=lambda x: x["dir"])
+        return make_response({"extractions": extractions}, 200)
+    except Exception as e:
+        return make_response({"error": str(e)}, 500)
+
+
+# ---------------------------------------------------------------------------
 # DRAFT API  — save / list / delete in-progress sessions
 # ---------------------------------------------------------------------------
 
