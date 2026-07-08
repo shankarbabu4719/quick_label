@@ -724,7 +724,17 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
                     {s === 'masked' && !hasMasked && <div style={{fontSize:10, opacity:0.5}}>not available</div>}
                   </button>
                 ))}
-              </div>
+                {/* Warning for masked source */}
+                {source === 'masked' && hasMasked && (
+                  <div style={{
+                    gridColumn:'1/-1', marginTop:6,
+                    padding:'8px 12px', borderRadius:8,
+                    background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.2)',
+                    fontSize:11, color:'#fbbf24', lineHeight:1.5,
+                  }}>
+                    ⚠️ Masked video is browser-encoded — may have short duration metadata. Use <strong>Original</strong> for reliable frame extraction.
+                  </div>
+                )}              </div>
             </div>
 
             {/* FPS selection */}
