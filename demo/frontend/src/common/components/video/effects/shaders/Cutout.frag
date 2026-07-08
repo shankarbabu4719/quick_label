@@ -23,6 +23,13 @@ uniform int uNumMasks;
 uniform sampler2D uMaskTexture0;
 uniform sampler2D uMaskTexture1;
 uniform sampler2D uMaskTexture2;
+uniform sampler2D uMaskTexture3;
+uniform sampler2D uMaskTexture4;
+uniform sampler2D uMaskTexture5;
+uniform sampler2D uMaskTexture6;
+uniform sampler2D uMaskTexture7;
+uniform sampler2D uMaskTexture8;
+uniform sampler2D uMaskTexture9;
 
 out vec4 fragColor;
 
@@ -32,33 +39,31 @@ vec3 applySepia(vec4 color) {
   sepia.r = min(sepia.r, 1.0);
   sepia.g = min(sepia.g, 1.0);
   sepia.b = min(sepia.b, 1.0);
-
   return sepia;
 }
 
 void main() {
   vec4 color = texture(uSampler, vTexCoord);
+  vec2 tc = vec2(vTexCoord.y, vTexCoord.x);
 
-  vec4 color1 = vec4(0.0f);
-  vec4 color2 = vec4(0.0f);
-  vec4 color3 = vec4(0.0f);
+  float m = 0.0;
+  if (uNumMasks > 0) m += texture(uMaskTexture0, tc).r;
+  if (uNumMasks > 1) m += texture(uMaskTexture1, tc).r;
+  if (uNumMasks > 2) m += texture(uMaskTexture2, tc).r;
+  if (uNumMasks > 3) m += texture(uMaskTexture3, tc).r;
+  if (uNumMasks > 4) m += texture(uMaskTexture4, tc).r;
+  if (uNumMasks > 5) m += texture(uMaskTexture5, tc).r;
+  if (uNumMasks > 6) m += texture(uMaskTexture6, tc).r;
+  if (uNumMasks > 7) m += texture(uMaskTexture7, tc).r;
+  if (uNumMasks > 8) m += texture(uMaskTexture8, tc).r;
+  if (uNumMasks > 9) m += texture(uMaskTexture9, tc).r;
 
-  if(uNumMasks > 0) {
-    color1 = texture(uMaskTexture0, vec2(vTexCoord.y, vTexCoord.x));
-  }
-  if(uNumMasks > 1) {
-    color2 = texture(uMaskTexture1, vec2(vTexCoord.y, vTexCoord.x));
-  }
-  if(uNumMasks > 2) {
-    color3 = texture(uMaskTexture2, vec2(vTexCoord.y, vTexCoord.x));
-  }
-
-  bool overlap = (color1.r > 0.0f || color2.r > 0.0f || color3.r > 0.0f);
-  if(overlap) {    
+  bool overlap = m > 0.0f;
+  if (overlap) {
     if (uContrast == 0.0) {
       color = vec4(applySepia(color), color.a);
     } else {
-      color.rgb = ((color.rgb - 0.5) * max(uContrast, 0.0)) + 0.5;   
+      color.rgb = ((color.rgb - 0.5) * max(uContrast, 0.0)) + 0.5;
     }
     fragColor = color;
   } else {
