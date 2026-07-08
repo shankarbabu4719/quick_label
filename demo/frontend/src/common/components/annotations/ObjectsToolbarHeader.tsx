@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {demoObjectLimit} from '@/demo/DemoConfig';
 import {isStreamingAtom, streamingStateAtom, trackletObjectsAtom} from '@/demo/atoms';
 import {useAtomValue} from 'jotai';
 
@@ -38,7 +39,7 @@ export default function ObjectsToolbarHeader() {
     ? `${tracklets.length} object${tracklets.length !== 1 ? 's' : ''} tracked across the video. Export when ready.`
     : isTracking
       ? 'Tracking in progress. Watch for errors — stop anytime to re-annotate.'
-      : 'Click any object in the video to annotate it. Add up to 3 objects.';
+      : `Click any object in the video to annotate it. Add up to ${demoObjectLimit} objects.`;
 
   return (
     <div style={{
