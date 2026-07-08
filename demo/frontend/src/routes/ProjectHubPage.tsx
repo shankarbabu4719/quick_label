@@ -113,6 +113,7 @@ export default function ProjectHubPage() {
   const [currentModel, setCurrentModel] = useState('tiny');
   const [modelSelected, setModelSelected] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<DraftProject | null>(null);
+  const [extractModal, setExtractModal] = useState<{projectName: string; displayName: string; hasMasked: boolean} | null>(null);
   const navigate = useNavigate();
   const setUploadingState = useSetAtom(uploadingStateAtom);
   const setSession        = useSetAtom(sessionAtom);
@@ -172,6 +173,14 @@ export default function ProjectHubPage() {
     a.href = `http://localhost:7263/exports/${name}/tracking.json`;
     a.download = 'tracking.json';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  function handleOpenExtractModal(p: ExportProject) {
+    setExtractModal({
+      projectName: p.name,
+      displayName: p.displayName || p.name.slice(0, 16) + '...',
+      hasMasked: p.hasMasked,
+    });
   }
 
   async function handleResumeDraft(draft: DraftProject) {
@@ -417,7 +426,10 @@ export default function ProjectHubPage() {
                 thumb={p.thumbnailUrl ? `http://localhost:7263/${p.thumbnailUrl}` : null}
                 name={p.displayName || (p.name.slice(0, 16) + '...')}
                 badge="Complete" badgeColor={C.green}
-                actions={p.hasJson ? [{label:'Download JSON', icon:'↓', color:C.indigo, onClick:() => handleDownloadJSON(p.name)}] : []}
+                actions={[
+                  ...(p.hasJson ? [{label:'Download JSON', icon:'↓', color:C.indigo, onClick:() => handleDownloadJSON(p.name)}] : []),
+                  {label:'Extract Frames', icon:'🖼', color:C.amber, onClick:() => handleOpenExtractModal(p)},
+                ]}
               />
             ))}
           </CardGrid>
@@ -460,11 +472,19 @@ export default function ProjectHubPage() {
           </CardGrid>
         )}
       </div>
+
+      {/* ── Extract Frames Modal ── */}
+      {extractModal && (
+        <ExtractFramesModal
+          projectName={extractModal.projectName}
+          displayName={extractModal.displayName}
+          hasMasked={extractModal.hasMasked}
+          onClose={() => setExtractModal(null)}
+        />
+      )}
     </div>
   );
 }
-
-// ── Sub-components ─────────────────────────────────────────────────
 
 function SectionHeader({title, count, accentColor, icon}: {title:string; count:number; accentColor:string; icon:string}) {
   return (
@@ -600,3 +620,215 @@ function Card({thumb, name, badge, badgeColor, meta, actions=[]}: {
     </div>
   );
 }
+
+// ── Sub-components ─────────────────────────────────────────────────
+
+// ── Extract Frames Modal ───────────────────────────────────────────
+function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
+  projectName: string;
+  displayName: string;
+  hasMasked: boolean;
+  onClose: () => void;
+}) {
+  const [fps, setFps] = useState('1');
+  const [source, setSource] = useState<'original' | 'masked'>('original');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [result, setResult] = useState<{frameCount: number; framesDir: string; alreadyExists: boolean} | null>(null);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const FPS_OPTIONS = [
+    {value: '0.5', label: '0.5 fps — 1 frame every 2s'},
+    {value: '1',   label: '1 fps  — 1 frame per second'},
+    {value: '2',   label: '2 fps  — 2 frames per second'},
+    {value: '5',   label: '5 fps  — 5 frames per second'},
+    {value: '10',  label: '10 fps — 10 frames per second'},
+    {value: '24',  label: '24 fps — every frame'},
+  ];
+
+  async function handleExtract() {
+    setStatus('loading');
+    setErrorMsg('');
+    try {
+      const r = await fetch(`http://localhost:7263/extract_frames/${projectName}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({fps: parseFloat(fps), source}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setErrorMsg(d.error || 'Extraction failed');
+        setStatus('error');
+        return;
+      }
+      setResult({frameCount: d.frame_count, framesDir: d.frames_dir, alreadyExists: d.already_exists});
+      setStatus('success');
+    } catch (e) {
+      setErrorMsg('Network error — is the backend running?');
+      setStatus('error');
+    }
+  }
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, zIndex:999,
+      background:'rgba(0,0,0,0.75)',
+      backdropFilter:'blur(6px)',
+      display:'flex', alignItems:'center', justifyContent:'center',
+      padding:24,
+    }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{
+        background:'#13151C',
+        border:'1px solid rgba(255,255,255,0.1)',
+        borderRadius:20,
+        padding:'32px 36px',
+        width:'100%', maxWidth:460,
+        boxShadow:'0 24px 64px rgba(0,0,0,0.6)',
+        animation:'fadeUp 0.2s ease',
+      }}>
+        <style>{`@keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }`}</style>
+
+        {/* Header */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24}}>
+          <div>
+            <div style={{fontSize:18, fontWeight:700, color:'#F0F2F7', letterSpacing:'-0.3px'}}>🖼 Extract Frames</div>
+            <div style={{fontSize:12, color:'rgba(240,242,247,0.4)', marginTop:3}}>{displayName}</div>
+          </div>
+          <button onClick={onClose} style={{
+            background:'rgba(255,255,255,0.06)', border:'none',
+            width:32, height:32, borderRadius:8,
+            color:'rgba(255,255,255,0.5)', fontSize:16,
+            cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+          }}>✕</button>
+        </div>
+
+        {status !== 'success' ? (
+          <>
+            {/* Source selection */}
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:12, fontWeight:600, color:'rgba(240,242,247,0.5)', marginBottom:10, letterSpacing:'0.05em', textTransform:'uppercase'}}>Source Video</div>
+              <div style={{display:'flex', gap:10}}>
+                {(['original', 'masked'] as const).map(s => (
+                  <button
+                    key={s}
+                    disabled={s === 'masked' && !hasMasked}
+                    onClick={() => setSource(s)}
+                    style={{
+                      flex:1, padding:'10px 0', borderRadius:10,
+                      border:`1px solid ${source === s ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                      background: source === s ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
+                      color: source === s ? '#a5b4fc' : (s === 'masked' && !hasMasked) ? 'rgba(255,255,255,0.2)' : 'rgba(240,242,247,0.6)',
+                      fontSize:13, fontWeight:600, cursor: (s === 'masked' && !hasMasked) ? 'not-allowed' : 'pointer',
+                      transition:'all 0.15s',
+                    }}>
+                    {s === 'original' ? '🎬 Original' : '🎭 Masked'}
+                    {s === 'masked' && !hasMasked && <div style={{fontSize:10, opacity:0.5}}>not available</div>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* FPS selection */}
+            <div style={{marginBottom:24}}>
+              <div style={{fontSize:12, fontWeight:600, color:'rgba(240,242,247,0.5)', marginBottom:10, letterSpacing:'0.05em', textTransform:'uppercase'}}>Frame Rate</div>
+              <div style={{display:'flex', flexDirection:'column', gap:6}}>
+                {FPS_OPTIONS.map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setFps(opt.value)}
+                    style={{
+                      textAlign:'left', padding:'10px 14px', borderRadius:10,
+                      border:`1px solid ${fps === opt.value ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.06)'}`,
+                      background: fps === opt.value ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.02)',
+                      color: fps === opt.value ? '#a5b4fc' : 'rgba(240,242,247,0.55)',
+                      fontSize:13, fontWeight: fps === opt.value ? 600 : 400,
+                      cursor:'pointer', transition:'all 0.15s',
+                    }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Error */}
+            {status === 'error' && (
+              <div style={{
+                marginBottom:16, padding:'10px 14px', borderRadius:10,
+                background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)',
+                fontSize:12, color:'#fca5a5',
+              }}>⚠️ {errorMsg}</div>
+            )}
+
+            {/* Extract button */}
+            <button
+              onClick={handleExtract}
+              disabled={status === 'loading'}
+              style={{
+                width:'100%', padding:'13px 0',
+                background: status === 'loading' ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                border:'none', borderRadius:12,
+                color:'#fff', fontSize:14, fontWeight:700,
+                cursor: status === 'loading' ? 'not-allowed' : 'pointer',
+                boxShadow:'0 4px 16px rgba(99,102,241,0.3)',
+                transition:'all 0.15s',
+                display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+              }}>
+              {status === 'loading' ? (
+                <>
+                  <span style={{
+                    width:14, height:14, borderRadius:'50%',
+                    border:'2px solid rgba(255,255,255,0.3)',
+                    borderTopColor:'#fff',
+                    animation:'spin 0.7s linear infinite',
+                    display:'inline-block',
+                  }} />
+                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                  Extracting frames...
+                </>
+              ) : (
+                <>🖼 Extract Frames</>
+              )}
+            </button>
+          </>
+        ) : (
+          /* Success state */
+          <div style={{textAlign:'center', padding:'8px 0'}}>
+            <div style={{fontSize:48, marginBottom:16}}>✅</div>
+            <div style={{fontSize:18, fontWeight:700, color:'#F0F2F7', marginBottom:8}}>
+              {result?.alreadyExists ? 'Already extracted!' : 'Frames extracted!'}
+            </div>
+            <div style={{fontSize:13, color:'rgba(240,242,247,0.5)', marginBottom:24, lineHeight:1.6}}>
+              <strong style={{color:'#a5b4fc'}}>{result?.frameCount}</strong> frames saved to<br/>
+              <code style={{
+                fontSize:11, background:'rgba(255,255,255,0.06)',
+                padding:'3px 8px', borderRadius:6, color:'rgba(240,242,247,0.7)',
+              }}>
+                exports/{projectName}/{result?.framesDir}/
+              </code>
+            </div>
+            <div style={{
+              padding:'10px 14px', borderRadius:10,
+              background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)',
+              fontSize:12, color:'#86efac', marginBottom:20, lineHeight:1.5,
+            }}>
+              📁 Frames are saved locally on the server.<br/>
+              Find them in the <strong>demo/data/exports/</strong> folder.
+            </div>
+            <div style={{display:'flex', gap:10}}>
+              <button onClick={() => { setStatus('idle'); setResult(null); }} style={{
+                flex:1, padding:'10px 0', borderRadius:10,
+                background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)',
+                color:'rgba(240,242,247,0.7)', fontSize:13, fontWeight:600, cursor:'pointer',
+              }}>Extract More</button>
+              <button onClick={onClose} style={{
+                flex:1, padding:'10px 0', borderRadius:10,
+                background:'#6366f1', border:'none',
+                color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer',
+              }}>Done</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
