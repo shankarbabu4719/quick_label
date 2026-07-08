@@ -390,11 +390,9 @@ def send_exported_file(path: str):
 @app.route("/extract_frames/<project_name>", methods=["POST"])
 def extract_frames(project_name: str) -> Response:
     """
-    Extract frames from a completed export project's original.mp4.
+    Extract frames from a completed export project's original.mp4 (or masked.mp4).
     Body JSON: { "fps": float, "source": "original" | "masked" }
-    - fps: frames per second to extract (default 1.0)
-    - source: which video to extract from (default "original")
-    Saves frames to exports/<project_name>/frames_<fps>fps_<source>/
+    Saves frames + per-frame JSON to exports/<project_name>/frames_<fps>fps_<source>/
     Returns: { "success": bool, "frames_dir": str, "frame_count": int }
     """
     import json, shutil, subprocess
@@ -419,6 +417,32 @@ def extract_frames(project_name: str) -> Response:
             if not video_path.exists():
                 return make_response({"error": "original.mp4 not found for this project"}, 404)
 
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return make_response({"error": "ffmpeg not found on this system"}, 500)
+
+        # Get actual video duration via ffprobe to detect bad masked.mp4 metadata
+        actual_duration = None
+        ffprobe = shutil.which("ffprobe")
+        if ffprobe:
+            try:
+                probe = subprocess.run(
+                    [ffprobe, "-v", "quiet", "-show_entries",
+                     "format=duration", "-of", "json", str(video_path)],
+                    capture_output=True, text=True
+                )
+                probe_data = json.loads(probe.stdout)
+                actual_duration = float(probe_data.get("format", {}).get("duration", 0))
+            except Exception:
+                pass
+
+        if actual_duration is not None and actual_duration < 1.0:
+            return make_response({
+                "error": f"Video duration is only {actual_duration:.1f}s — "
+                         f"masked.mp4 may have encoding issues. Use 'original' source instead.",
+                "duration": actual_duration,
+            }, 400)
+
         # Create output folder — name includes fps + source
         fps_label = str(fps).rstrip('0').rstrip('.') if '.' in str(fps) else str(fps)
         frames_dir_name = f"frames_{fps_label}fps_{source}"
@@ -437,24 +461,19 @@ def extract_frames(project_name: str) -> Response:
 
         os.makedirs(frames_dir, exist_ok=True)
 
-        ffmpeg = shutil.which("ffmpeg")
-        if not ffmpeg:
-            return make_response({"error": "ffmpeg not found on this system"}, 500)
-
         # Extract frames: ffmpeg -i video.mp4 -vf fps=N frame_%06d.jpg
         output_pattern = str(frames_dir / "frame_%06d.jpg")
         cmd = [
             ffmpeg, "-y",
             "-i", str(video_path),
             "-vf", f"fps={fps}",
-            "-q:v", "2",          # JPEG quality (2 = high)
+            "-q:v", "2",        # JPEG quality (2 = high)
             "-threads", "2",
             output_pattern,
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            # Clean up empty folder
             try:
                 frames_dir.rmdir()
             except Exception:
@@ -462,8 +481,49 @@ def extract_frames(project_name: str) -> Response:
             logger.error(f"ffmpeg extract_frames failed: {result.stderr}")
             return make_response({"error": "Frame extraction failed", "details": result.stderr[-500:]}, 500)
 
-        frame_count = len(list(frames_dir.glob("*.jpg")))
+        frame_files = sorted(frames_dir.glob("*.jpg"))
+        frame_count = len(frame_files)
         logger.info(f"Extracted {frame_count} frames to {frames_dir}")
+
+        # ── Write per-frame JSON from tracking.json ──────────────────────────
+        tracking_data: dict = {}
+        tracking_json_path = project_folder / "tracking.json"
+        if tracking_json_path.exists():
+            try:
+                with open(tracking_json_path, "r", encoding="utf-8") as tf:
+                    td = json.load(tf)
+                objects = td.get("objects", [])
+                for frame in td.get("frames", []):
+                    tracking_data[frame["frame_index"]] = {
+                        "frame_index": frame["frame_index"],
+                        "objects": objects,
+                        "masks": frame.get("masks", []),
+                    }
+            except Exception as e:
+                logger.warning(f"Could not load tracking.json: {e}")
+
+        # Estimate source fps from tracking data frame count + duration
+        source_num_frames = len(tracking_data) if tracking_data else frame_count
+        source_fps_val = source_num_frames / actual_duration if actual_duration and actual_duration > 0 else fps
+
+        for i, frame_file in enumerate(frame_files):
+            # Map extracted frame index back to nearest tracking frame
+            extracted_sec = i / fps
+            source_frame_idx = int(round(extracted_sec * source_fps_val))
+            # Clamp to available range
+            if tracking_data:
+                max_idx = max(tracking_data.keys())
+                source_frame_idx = min(source_frame_idx, max_idx)
+
+            frame_json = tracking_data.get(source_frame_idx, {
+                "frame_index": source_frame_idx,
+                "objects": [],
+                "masks": [],
+                "note": "No mask data for this frame",
+            })
+            json_path = frames_dir / (frame_file.stem + ".json")
+            with open(json_path, "w", encoding="utf-8") as jf:
+                json.dump(frame_json, jf, indent=2)
 
         return make_response({
             "success": True,
