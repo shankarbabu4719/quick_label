@@ -24,38 +24,36 @@ uniform int uNumMasks;
 uniform sampler2D uMaskTexture0;
 uniform sampler2D uMaskTexture1;
 uniform sampler2D uMaskTexture2;
+uniform sampler2D uMaskTexture3;
+uniform sampler2D uMaskTexture4;
+uniform sampler2D uMaskTexture5;
+uniform sampler2D uMaskTexture6;
+uniform sampler2D uMaskTexture7;
+uniform sampler2D uMaskTexture8;
+uniform sampler2D uMaskTexture9;
 
 out vec4 fragColor;
 
 void main() {
-  vec4 color = texture(uSampler, vTexCoord);
   vec2 uv = vTexCoord.xy;
   float dx = uBlockSize / uSize.x;
   float dy = uBlockSize / uSize.y;
+  vec2 sampleCoord = (vec2(dx*floor(uv.x/dx), dy*floor(uv.y/dy)) +
+                      vec2(dx*ceil(uv.x/dx),  dy*ceil(uv.y/dy))) / 2.0f;
+  vec4 color = texture(uSampler, sampleCoord);
 
-  vec4 color1 = vec4(0.0f);
-  vec4 color2 = vec4(0.0f);
-  vec4 color3 = vec4(0.0f);
+  vec2 tc = vec2(vTexCoord.y, vTexCoord.x);
+  float m = 0.0;
+  if (uNumMasks > 0) m += texture(uMaskTexture0, tc).r;
+  if (uNumMasks > 1) m += texture(uMaskTexture1, tc).r;
+  if (uNumMasks > 2) m += texture(uMaskTexture2, tc).r;
+  if (uNumMasks > 3) m += texture(uMaskTexture3, tc).r;
+  if (uNumMasks > 4) m += texture(uMaskTexture4, tc).r;
+  if (uNumMasks > 5) m += texture(uMaskTexture5, tc).r;
+  if (uNumMasks > 6) m += texture(uMaskTexture6, tc).r;
+  if (uNumMasks > 7) m += texture(uMaskTexture7, tc).r;
+  if (uNumMasks > 8) m += texture(uMaskTexture8, tc).r;
+  if (uNumMasks > 9) m += texture(uMaskTexture9, tc).r;
 
-  vec2 sampleCoord = (vec2(dx * floor((uv.x / dx)), dy * floor((uv.y / dy))) +
-  vec2(dx * ceil((uv.x / dx)), dy * ceil((uv.y / dy)))) / 2.0f;
-  vec4 frameColor = texture(uSampler, sampleCoord);
-  color = frameColor;
-
-  if(uNumMasks > 0) {
-    color1 = texture(uMaskTexture0, vec2(vTexCoord.y, vTexCoord.x));
-  }
-  if(uNumMasks > 1) {
-    color2 = texture(uMaskTexture1, vec2(vTexCoord.y, vTexCoord.x));    
-  }
-  if(uNumMasks > 2) {
-    color3 = texture(uMaskTexture2, vec2(vTexCoord.y, vTexCoord.x));
-  }
-
-  bool overlap = (color1.r > 0.0f || color2.r > 0.0f || color3.r > 0.0f);
-  if(overlap) {
-    fragColor = color;
-  } else {
-    fragColor = vec4(0.0f);
-  }
+  fragColor = m > 0.0f ? color : vec4(0.0f);
 }

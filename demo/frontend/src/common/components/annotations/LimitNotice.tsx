@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import {demoObjectLimit} from '@/demo/DemoConfig';
 import {InformationFilled} from '@carbon/icons-react';
 
 export default function LimitNotice() {
@@ -22,7 +23,7 @@ export default function LimitNotice() {
         <InformationFilled size={32} />
       </div>
       <div className="text-sm leading-snug">
-        In this demo, you can track up to 3 objects, even though the SAM 2 model
+        In this demo, you can track up to {demoObjectLimit} objects, even though the SAM 2 model
         does not have a limit.
       </div>
     </div>
