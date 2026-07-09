@@ -84,6 +84,13 @@ $env:API_URL = "http://localhost:7263"
 $env:MODEL_SIZE = "tiny"
 $env:DATA_PATH = "$PROJECT_ROOT\demo\data"
 $env:DEFAULT_VIDEO_PATH = "gallery/05_default_juggle.mp4"
+$env:SAM2_MAX_FRAMES = "300"
+$env:VIDEO_ENCODE_MAX_FRAMES = "300"
+$env:VIDEO_ENCODE_FPS = "10"
+$env:VIDEO_ENCODE_MAX_WIDTH = "640"
+$env:VIDEO_ENCODE_MAX_HEIGHT = "360"
+$env:VIDEO_ENCODE_CRF = "28"
+$env:FFMPEG_NUM_THREADS = "4"
 
 $backend = Start-Process python -ArgumentList "app.py" -PassThru -WindowStyle Hidden -RedirectStandardOutput "$PROJECT_ROOT\backend.log" -RedirectStandardError "$PROJECT_ROOT\backend_err.log"
 Set-Location $PROJECT_ROOT

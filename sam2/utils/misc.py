@@ -296,12 +296,12 @@ def load_video_frames_from_video_file(
     # Get the original video height and width
     decord.bridge.set_bridge("torch")
     video_height, video_width, _ = decord.VideoReader(video_path).next().shape
-    # Iterate over all frames in the video (capped at max_frames)
+    # Iterate over frames, stopping at max_frames
     images = []
-    for i, frame in enumerate(decord.VideoReader(video_path, width=image_size, height=image_size)):
-        if i >= max_frames:
-            break
+    for frame in decord.VideoReader(video_path, width=image_size, height=image_size):
         images.append(frame.permute(2, 0, 1))
+        if len(images) >= max_frames:
+            break
 
     images = torch.stack(images, dim=0).float() / 255.0
     if not offload_video_to_cpu:
