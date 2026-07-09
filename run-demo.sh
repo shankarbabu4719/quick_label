@@ -74,6 +74,10 @@ API_URL=http://localhost:7263 \
 MODEL_SIZE=tiny \
 DATA_PATH="$PROJECT_ROOT/demo/data" \
 DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4 \
+SAM2_MAX_FRAMES=300 \
+VIDEO_ENCODE_MAX_FRAMES=300 \
+VIDEO_ENCODE_FPS=10 \
+FFMPEG_NUM_THREADS=4 \
   python app.py 2>&1 &
 
 BACKEND_PID=$!
