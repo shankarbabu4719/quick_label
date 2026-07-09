@@ -390,10 +390,15 @@ def send_exported_file(path: str):
 @app.route("/extract_frames/<project_name>", methods=["POST"])
 def extract_frames(project_name: str) -> Response:
     """
-    Extract frames from a completed export project's original.mp4 (or masked.mp4).
+    Extract frames from a completed export project.
     Body JSON: { "fps": float, "source": "original" | "masked" }
-    Saves frames + per-frame JSON to exports/<project_name>/frames_<fps>fps_<source>/
-    Returns: { "success": bool, "frames_dir": str, "frame_count": int }
+
+    - source="original": extracts frames from original.mp4, saves JPG + JSON
+    - source="masked":   extracts from original.mp4 then applies mask color
+                         overlays using tracking.json + PIL (avoids broken
+                         masked.mp4 duration metadata from browser WebCodecs)
+
+    Saves to exports/<project_name>/frames_<fps>fps_<source>/
     """
     import json, shutil, subprocess
 
@@ -402,93 +407,94 @@ def extract_frames(project_name: str) -> Response:
         fps = float(body.get("fps", 1.0))
         source = body.get("source", "original")
 
-        # Validate project folder
         project_folder = EXPORTS_PATH / project_name
         if not project_folder.exists() or not project_folder.is_dir():
             return make_response({"error": "Project not found"}, 404)
 
-        # Pick source video
-        if source == "masked":
-            video_path = project_folder / "masked.mp4"
-            if not video_path.exists():
-                return make_response({"error": "masked.mp4 not found for this project"}, 404)
-        else:
-            video_path = project_folder / "original.mp4"
-            if not video_path.exists():
-                return make_response({"error": "original.mp4 not found for this project"}, 404)
+        # Always extract from original.mp4 — masked.mp4 has broken duration
+        # metadata (browser WebCodecs). For "masked" we overlay masks via PIL.
+        video_path = project_folder / "original.mp4"
+        if not video_path.exists():
+            return make_response({"error": "original.mp4 not found for this project"}, 404)
 
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
             return make_response({"error": "ffmpeg not found on this system"}, 500)
 
-        # Get actual frame count from tracking.json — source of truth for duration
+        # ── Load tracking.json ────────────────────────────────────────────────
         tracking_data: dict = {}
         objects_list: list = []
-        tracking_json_path = project_folder / "tracking.json"
         num_tracking_frames = 0
+        tracking_json_path = project_folder / "tracking.json"
         if tracking_json_path.exists():
             try:
                 with open(tracking_json_path, "r", encoding="utf-8") as tf:
                     td = json.load(tf)
                 objects_list = td.get("objects", [])
+                num_tracking_frames = td.get("num_frames", 0)
                 for frame in td.get("frames", []):
                     tracking_data[frame["frame_index"]] = {
                         "frame_index": frame["frame_index"],
                         "objects": objects_list,
                         "masks": frame.get("masks", []),
                     }
-                num_tracking_frames = td.get("num_frames", len(tracking_data))
+                if not num_tracking_frames and tracking_data:
+                    num_tracking_frames = max(tracking_data.keys()) + 1
             except Exception as e:
                 logger.warning(f"Could not load tracking.json: {e}")
 
-        # Create output folder — name includes fps + source
+        # ── Compute actual encode fps from video duration + frame count ───────
+        # transcoder.py uses dynamic fps (4-24fps based on MAX_FRAMES/duration)
+        # We must know the real encode fps to correctly map frame index → tracking index
+        encode_fps = 24.0
+        try:
+            ffprobe = shutil.which("ffprobe")
+            if ffprobe and num_tracking_frames > 0:
+                probe = subprocess.run(
+                    [ffprobe, "-v", "quiet", "-show_entries", "format=duration",
+                     "-of", "json", str(video_path)],
+                    capture_output=True, text=True
+                )
+                probe_data = json.loads(probe.stdout)
+                video_duration = float(probe_data.get("format", {}).get("duration", 0))
+                if video_duration > 0:
+                    encode_fps = num_tracking_frames / video_duration
+                    logger.info(f"Computed encode_fps={encode_fps:.2f} ({num_tracking_frames} frames / {video_duration:.1f}s)")
+        except Exception as e:
+            logger.warning(f"Could not compute encode_fps: {e}")
+
+        # ── Create output folder ──────────────────────────────────────────────
         fps_label = str(fps).rstrip('0').rstrip('.') if '.' in str(fps) else str(fps)
         frames_dir_name = f"frames_{fps_label}fps_{source}"
         frames_dir = project_folder / frames_dir_name
 
-        # If already extracted, return existing count
         if frames_dir.exists():
-            existing = list(frames_dir.glob("*.jpg"))
-            if existing:
+            existing_jpgs = sorted(frames_dir.glob("*.jpg"))
+            if existing_jpgs:
                 return make_response({
                     "success": True,
                     "frames_dir": frames_dir_name,
-                    "frame_count": len(existing),
+                    "frame_count": len(existing_jpgs),
                     "already_exists": True,
                 }, 200)
+            else:
+                shutil.rmtree(frames_dir)
 
         os.makedirs(frames_dir, exist_ok=True)
 
-        # Extract frames
-        # For masked.mp4 (browser WebCodecs encoded): use -ignore_editlist 1
-        # to bypass broken duration metadata and extract all actual frames
+        # ── Extract frames from original.mp4 ─────────────────────────────────
         output_pattern = str(frames_dir / "frame_%06d.jpg")
-        if source == "masked":
-            cmd = [
-                ffmpeg, "-y",
-                "-ignore_editlist", "1",
-                "-i", str(video_path),
-                "-vf", f"fps={fps}",
-                "-q:v", "2",
-                "-threads", "2",
-                output_pattern,
-            ]
-        else:
-            cmd = [
-                ffmpeg, "-y",
-                "-i", str(video_path),
-                "-vf", f"fps={fps}",
-                "-q:v", "2",
-                "-threads", "2",
-                output_pattern,
-            ]
-
+        cmd = [
+            ffmpeg, "-y",
+            "-i", str(video_path),
+            "-vf", f"fps={fps}",
+            "-q:v", "2",
+            "-threads", "2",
+            output_pattern,
+        ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            try:
-                frames_dir.rmdir()
-            except Exception:
-                pass
+            shutil.rmtree(frames_dir, ignore_errors=True)
             logger.error(f"ffmpeg extract_frames failed: {result.stderr}")
             return make_response({"error": "Frame extraction failed", "details": result.stderr[-500:]}, 500)
 
@@ -496,28 +502,63 @@ def extract_frames(project_name: str) -> Response:
         frame_count = len(frame_files)
         logger.info(f"Extracted {frame_count} frames to {frames_dir}")
 
-        # ── Write per-frame JSON from tracking.json ──────────────────────────
-        # Map each extracted frame back to the nearest tracking frame index
-        # tracking was done at VIDEO_ENCODE_FPS (typically 24fps)
-        # extracted at user-selected fps
-        source_fps_val = num_tracking_frames / (num_tracking_frames / 24.0) if num_tracking_frames > 0 else 24.0
-        # Simpler: use max tracking frame index to estimate source fps
-        if tracking_data:
-            max_track_idx = max(tracking_data.keys())
-            # num_tracking_frames frames over max_track_idx+1 indices
-            source_fps_val = 24.0  # SAM2 processes at encode fps (default 24)
+        # ── Apply mask color overlays for "masked" source ─────────────────────
+        if source == "masked" and tracking_data:
+            try:
+                import numpy as np
+                from PIL import Image
+                from pycocotools.mask import decode as rle_decode
 
+                COLORS = [
+                    (99, 102, 241), (34, 197, 94), (245, 158, 11), (239, 68, 68),
+                    (16, 185, 129), (139, 92, 246), (236, 72, 153), (14, 165, 233),
+                    (249, 115, 22), (160, 255, 80),
+                ]
+                ALPHA = 140  # mask opacity 0-255
+
+                for i, frame_file in enumerate(frame_files):
+                    extracted_sec = i / fps
+                    track_idx = int(round(extracted_sec * encode_fps))
+                    if tracking_data:
+                        track_idx = min(track_idx, max(tracking_data.keys()))
+
+                    frame_data = tracking_data.get(track_idx)
+                    if not frame_data or not frame_data.get("masks"):
+                        continue  # no mask — keep original frame
+
+                    img = Image.open(frame_file).convert("RGBA")
+                    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+
+                    for mask_entry in frame_data["masks"]:
+                        obj_id = mask_entry.get("object_id", 0)
+                        rle = mask_entry.get("mask")
+                        if not rle:
+                            continue
+                        try:
+                            decoded = rle_decode({"counts": rle["counts"], "size": rle["size"]})
+                            color = COLORS[obj_id % len(COLORS)]
+                            mask_rgba = np.zeros((*decoded.shape, 4), dtype=np.uint8)
+                            mask_rgba[decoded > 0] = [*color, ALPHA]
+                            mask_img = Image.fromarray(mask_rgba, "RGBA")
+                            overlay = Image.alpha_composite(overlay, mask_img)
+                        except Exception as me:
+                            logger.warning(f"Could not apply mask obj {obj_id}: {me}")
+
+                    composited = Image.alpha_composite(img, overlay).convert("RGB")
+                    composited.save(str(frame_file), "JPEG", quality=92)
+
+            except ImportError as ie:
+                logger.warning(f"PIL/numpy not available for mask overlay: {ie}. Saving plain frames.")
+
+        # ── Write per-frame JSON ──────────────────────────────────────────────
         for i, frame_file in enumerate(frame_files):
-            # seconds into video for this extracted frame
             extracted_sec = i / fps
-            # nearest tracking frame index
-            source_frame_idx = int(round(extracted_sec * source_fps_val))
+            track_idx = int(round(extracted_sec * encode_fps))
             if tracking_data:
-                max_idx = max(tracking_data.keys())
-                source_frame_idx = min(source_frame_idx, max_idx)
+                track_idx = min(track_idx, max(tracking_data.keys()))
 
-            frame_json = tracking_data.get(source_frame_idx, {
-                "frame_index": source_frame_idx,
+            frame_json = tracking_data.get(track_idx, {
+                "frame_index": track_idx,
                 "objects": objects_list,
                 "masks": [],
                 "note": "No mask data for this frame",
@@ -538,7 +579,6 @@ def extract_frames(project_name: str) -> Response:
     except Exception as e:
         logger.error(f"Error extracting frames for {project_name}: {e}")
         return make_response({"error": str(e)}, 500)
-
 
 @app.route("/frames_status/<project_name>", methods=["GET"])
 def frames_status(project_name: str) -> Response:
