@@ -26,12 +26,23 @@ export default function ExtractFramesOption() {
     }
     setExtracting(true);
     try {
-      const params = new URLSearchParams({fps: String(fps)});
-      if (cropRange.startFrame > 0) params.set('start_frame', String(cropRange.startFrame));
-      if (cropRange.endFrame >= 0) params.set('end_frame', String(cropRange.endFrame));
+      // Step 1: get the project_name for this session from backend
+      const infoResp = await fetch(
+        `${INFERENCE_API_ENDPOINT}/session_export_info/${session.id}`,
+      );
+      if (!infoResp.ok) throw new Error('Session not exported yet');
+      const info = await infoResp.json();
+      const projectName = info.project_name;
+      if (!projectName) throw new Error('No export folder for this session');
 
+      // Step 2: extract frames via POST /extract_frames/<project_name>
       const response = await fetch(
-        `${INFERENCE_API_ENDPOINT}/extract_frames/${session.id}?${params.toString()}`,
+        `${INFERENCE_API_ENDPOINT}/extract_frames/${projectName}`,
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({fps, source: 'original'}),
+        },
       );
 
       if (!response.ok) throw new Error('Failed to extract frames');
@@ -39,7 +50,7 @@ export default function ExtractFramesOption() {
       const data = await response.json();
 
       if (data.success) {
-        alert(`✅ ${data.frame_count} frames saved!\n\nFolder: ${data.folder_name}\n\nCheck your exports folder on the server.`);
+        alert(`✅ ${data.frame_count} frames saved!\n\nFolder: ${data.frames_dir}\n\nCheck exports folder on server.`);
       } else {
         throw new Error(data.error || 'Unknown error');
       }

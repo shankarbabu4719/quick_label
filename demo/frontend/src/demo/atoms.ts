@@ -37,6 +37,7 @@ export type VideoData = {
   posterUrl: string;
   width: number;
   height: number;
+  durationSec?: number | null;
 };
 
 export const frameIndexAtom = atom<number>(0);

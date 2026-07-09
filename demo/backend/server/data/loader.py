@@ -43,6 +43,7 @@ def get_video(
     generate_poster: bool = True,
     width: Optional[int] = None,
     height: Optional[int] = None,
+    duration_sec: Optional[float] = None,
     verbose: Optional[bool] = False,
 ) -> Video:
     """
@@ -87,6 +88,7 @@ def get_video(
         code=video_path,
         path=video_path if file_key is None else file_key,
         poster_path=poster_path,
-        width=width,
-        height=height,
+        width=width or 0,
+        height=height or 0,
+        duration_sec=duration_sec,
     )

@@ -215,36 +215,21 @@ export function getPointInImage(
   canvas: HTMLCanvasElement,
   normalized: boolean = false,
 ): [x: number, y: number] {
-  const rect = canvas.getBoundingClientRect();
+  // Get canvas rendered size on screen
+  const canvasRect = canvas.getBoundingClientRect();
 
-  const matrix = new DOMMatrix();
+  // canvas.width/height = actual pixel dimensions (e.g. 640x360)
+  // canvasRect.width/height = rendered CSS dimensions (e.g. 1200x675)
+  // Simple direct mapping: click position relative to canvas → pixel coordinate
+  const clickX = event.clientX - canvasRect.left;
+  const clickY = event.clientY - canvasRect.top;
 
-  // First, center the image
-  const elementCenter = new DOMPoint(
-    canvas.clientWidth / 2,
-    canvas.clientHeight / 2,
-  );
-  const imageCenter = new DOMPoint(canvas.width / 2, canvas.height / 2);
-  matrix.translateSelf(
-    elementCenter.x - imageCenter.x,
-    elementCenter.y - imageCenter.y,
-  );
+  // Direct scale: rendered → pixel
+  const scaleX = canvas.width  / canvasRect.width;
+  const scaleY = canvas.height / canvasRect.height;
 
-  // Containing the object take the minimal scale
-  const scale = Math.min(
-    canvas.clientWidth / canvas.width,
-    canvas.clientHeight / canvas.height,
-  );
-  matrix.scaleSelf(scale, scale, 1, imageCenter.x, imageCenter.y);
-
-  const point = new DOMPoint(
-    event.clientX - rect.left,
-    event.clientY - rect.top,
-  );
-  const imagePoint = matrix.inverse().transformPoint(point);
-
-  const x = Math.max(Math.min(imagePoint.x, canvas.width), 0);
-  const y = Math.max(Math.min(imagePoint.y, canvas.height), 0);
+  const x = Math.max(0, Math.min(clickX * scaleX, canvas.width));
+  const y = Math.max(0, Math.min(clickY * scaleY, canvas.height));
 
   if (normalized) {
     return [x / canvas.width, y / canvas.height];

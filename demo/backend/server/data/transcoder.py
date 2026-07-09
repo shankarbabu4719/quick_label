@@ -185,11 +185,12 @@ def normalize_video(
         "-i",
         in_path,
         "-threads",
-        f"{FFMPEG_NUM_THREADS}",  # decode (or filter..?) threads
+        f"{FFMPEG_NUM_THREADS}",  # decode threads
         "-vf",
         f"fps={fps},scale={w}:{h},setsar=1:1",
         "-c:v",
         codec,
+        "-preset", "ultrafast",   # fastest encode — CPU time 10x less
         "-crf",
         f"{crf}",
         "-pix_fmt",

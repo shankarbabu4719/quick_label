@@ -84,7 +84,7 @@ export type ControlsProps = {
 };
 
 type Props = PropsWithChildren<{
-  video: VideoData;
+  video: VideoData | undefined | null;
   layers?: React.ReactNode;
   loading?: boolean;
 }>;
@@ -111,9 +111,9 @@ export default function VideoEditor({
       <div {...stylex.props(styles.videoContainer)}>
         <Video
           ref={videoRef}
-          src={inputVideo.url}
-          width={inputVideo.width}
-          height={inputVideo.height}
+          src={inputVideo?.url ?? ''}
+          width={inputVideo?.width ?? 1280}
+          height={inputVideo?.height ?? 720}
           loading={loading}
         />
         <div {...stylex.props(styles.layers)}>{layers}</div>
