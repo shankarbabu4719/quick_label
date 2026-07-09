@@ -89,7 +89,7 @@ const styles = stylex.create({
 });
 
 type Props = {
-  video: VideoData;
+  video: VideoData | undefined | null;
 };
 
 export default function DemoVideoEditor({video: inputVideo}: Props) {
@@ -188,7 +188,7 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
       inferenceEndpoint: settings.inferenceAPIEndpoint,
     });
 
-    video?.startSession(inputVideo.path);
+    video?.startSession(inputVideo?.path ?? '');
 
     return () => {
       video?.closeSession();
@@ -236,7 +236,8 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
   }
 
   async function handleAddPoint(point: SegmentationPoint) {
-    if (streamingState === 'partial' || streamingState === 'requesting') {
+    // Allow clicks even during 'requesting' state — SAM2 processes them sequentially
+    if (streamingState === 'partial') {
       return;
     }
     if (isPlaying) {
@@ -304,7 +305,7 @@ export default function DemoVideoEditor({video: inputVideo}: Props) {
       )}
       <div {...stylex.props(styles.container)}>
         <VideoEditor
-          video={inputVideo}
+          video={inputVideo ?? undefined}
           layers={layers}
           loading={session == null}>
           <div className="bg-graydark-800 w-full">
