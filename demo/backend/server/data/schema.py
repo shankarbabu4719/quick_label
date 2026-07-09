@@ -61,21 +61,30 @@ class Query:
     def default_video(self) -> Video:
         """
         Return the default video.
-
-        The default video can be set with the DEFAULT_VIDEO_PATH environment
-        variable. It will return the video that matches this path. If no video
-        is found, it will return the first video.
+        If gallery is empty (no videos), return a placeholder so DemoPage
+        doesn't crash — uploaded videos are passed via navigation state anyway.
         """
         all_videos = get_videos()
 
-        # Find the video that matches the default path and return that as
-        # default video.
+        # Find the video that matches the default path and return that as default video.
         for _, v in all_videos.items():
             if v.path == DEFAULT_VIDEO_PATH:
                 return v
 
-        # Fallback is returning the first video
-        return next(iter(all_videos.values()))
+        # Fallback: return first available video
+        if all_videos:
+            return next(iter(all_videos.values()))
+
+        # Gallery is empty — return a placeholder so the query doesn't crash.
+        # DemoPage uses navigation state.video for uploaded videos anyway.
+        return Video(
+            code="__placeholder__",
+            path="__placeholder__",
+            poster_path=None,
+            width=1280,
+            height=720,
+            duration_sec=None,
+        )
 
     @relay.connection(relay.ListConnection[Video])
     def videos(
@@ -99,22 +108,43 @@ class Mutation:
         duration_time_sec: Optional[float] = None,
     ) -> Video:
         """
-        Receive a video file and store it in the configured S3 bucket.
+        Save the raw uploaded video file without encoding.
+        Returns video metadata (duration, dimensions) so frontend can show
+        crop-range selection UI before encoding starts.
+        Encoding happens later via POST /prepare_session.
         """
-        max_time = MAX_UPLOAD_VIDEO_DURATION
-        filepath, file_key, vm = process_video(
-            file,
-            max_time=max_time,
-            start_time_sec=start_time_sec,
-            duration_time_sec=duration_time_sec,
-        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            in_path = f"{tempdir}/in.mp4"
+            with open(in_path, "wb") as in_f:
+                in_f.write(file.read())
+
+            try:
+                video_metadata = get_video_metadata(in_path)
+            except av.InvalidDataError:
+                raise Exception("not valid video file")
+
+            if video_metadata.num_video_streams == 0:
+                raise Exception("video container does not contain a video stream")
+            if video_metadata.width is None or video_metadata.height is None:
+                raise Exception("video container does not contain width or height metadata")
+            if video_metadata.duration_sec in (None, 0):
+                raise Exception("video container does not contain time duration metadata")
+
+            # Save raw file using hash as filename
+            with open(in_path, "rb") as f:
+                file_hash = get_file_hash(f)
+
+            raw_file_key = UPLOADS_PREFIX + "/raw_" + f"{file_hash}.mp4"
+            raw_filepath = os.path.join(UPLOADS_PATH, f"raw_{file_hash}.mp4")
+            shutil.copy2(in_path, raw_filepath)
 
         video = get_video(
-            filepath,
+            raw_filepath,
             UPLOADS_PATH,
-            file_key=file_key,
-            width=vm.width,
-            height=vm.height,
+            file_key=raw_file_key,
+            width=video_metadata.width,
+            height=video_metadata.height,
+            duration_sec=video_metadata.duration_sec,
             generate_poster=False,
         )
         return video

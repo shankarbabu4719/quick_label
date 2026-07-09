@@ -502,19 +502,98 @@ def extract_frames(project_name: str) -> Response:
         frame_count = len(frame_files)
         logger.info(f"Extracted {frame_count} frames to {frames_dir}")
 
-        # ── Apply mask color overlays for "masked" source ─────────────────────
+        # ── Helper functions (defined before use) ────────────────────────────
+
+        def rle_to_bbox(rle_counts, size: list) -> list:
+            """
+            Convert COCO RLE mask to [x, y, w, h] bounding box.
+            counts can be a decoded string (as stored by SAM2 predictor) or bytes.
+            size = [height, width].
+            """
+            if not rle_counts or not size or len(size) < 2:
+                return []
+            try:
+                from pycocotools.mask import toBbox
+                bbox = toBbox({"counts": rle_counts, "size": list(size)})
+                return [round(float(v), 2) for v in bbox]
+            except Exception as _e:
+                logger.warning(f"rle_to_bbox (pycocotools) failed: {_e}")
+
+            # Pure-Python fallback: decode RLE run-lengths (column-major order)
+            try:
+                h, w = int(size[0]), int(size[1])
+                counts = rle_counts
+                if isinstance(counts, (bytes, bytearray)):
+                    counts = counts.decode("utf-8", errors="replace")
+                if not isinstance(counts, str):
+                    return []
+                runs = list(map(int, counts.split()))
+                min_row, max_row = h, -1
+                min_col, max_col = w, -1
+                pixel = 0
+                value = 0
+                for run in runs:
+                    if value == 1 and run > 0:
+                        col_s = pixel // h
+                        row_s = pixel % h
+                        col_e = (pixel + run - 1) // h
+                        row_e = (pixel + run - 1) % h
+                        min_col = min(min_col, col_s)
+                        max_col = max(max_col, col_e)
+                        if col_s == col_e:
+                            min_row = min(min_row, row_s)
+                            max_row = max(max_row, row_e)
+                        else:
+                            min_row = min(min_row, row_s, 0)
+                            max_row = max(max_row, row_e, h - 1)
+                    pixel += run
+                    value = 1 - value
+                if max_col < 0:
+                    return []
+                return [min_col, min_row, max_col - min_col + 1, max_row - min_row + 1]
+            except Exception as _e2:
+                logger.warning(f"rle_to_bbox (pure-python) failed: {_e2}")
+                return []
+
+        def bbox_to_points(bbox: list) -> list:
+            """Convert [x, y, w, h] to LabelMe rectangle [[x1,y1],[x2,y2]]."""
+            if not bbox or len(bbox) < 4:
+                return []
+            x, y, w, h = bbox
+            return [[round(x, 2), round(y, 2)], [round(x + w, 2), round(y + h, 2)]]
+
+        def img_to_b64(path: str) -> str:
+            """Encode image to base64 string."""
+            import base64
+            try:
+                with open(path, "rb") as f:
+                    return base64.b64encode(f.read()).decode("utf-8")
+            except Exception:
+                return ""
+
+        # Build label lookup: object_id → label
+        label_map = {obj["object_id"]: obj.get("label", f"object_{obj['object_id']}") for obj in objects_list}
+
+        # ── Draw bounding boxes on frames for "masked" source ────────────────
         if source == "masked" and tracking_data:
             try:
-                import numpy as np
-                from PIL import Image
-                from pycocotools.mask import decode as rle_decode
+                from PIL import Image, ImageDraw, ImageFont
 
+                # Same 10 colors as the frontend THEME_COLORS
                 COLORS = [
-                    (99, 102, 241), (34, 197, 94), (245, 158, 11), (239, 68, 68),
-                    (16, 185, 129), (139, 92, 246), (236, 72, 153), (14, 165, 233),
-                    (249, 115, 22), (160, 255, 80),
+                    (56, 128, 243),   # #3880F3
+                    (240, 170,  25),  # #F0AA19
+                    (  0, 210, 190),  # #00D2BE
+                    ( 40, 210,  50),  # #28D232
+                    (135, 115, 255),  # #8773FF
+                    (  0, 200, 240),  # #00C8F0
+                    (250, 135,  25),  # #FA8719
+                    (230,  25,  59),  # #E6193B
+                    (250, 125, 200),  # #FA7DC8
+                    (160, 255,  80),  # #A0FF50
                 ]
-                ALPHA = 140  # mask opacity 0-255
+                BOX_ALPHA  = 50  # fill transparency (0-255)
+                LINE_WIDTH = 3   # border thickness in pixels
 
                 for i, frame_file in enumerate(frame_files):
                     extracted_sec = i / fps
@@ -524,48 +603,109 @@ def extract_frames(project_name: str) -> Response:
 
                     frame_data = tracking_data.get(track_idx)
                     if not frame_data or not frame_data.get("masks"):
-                        continue  # no mask — keep original frame
+                        continue  # no objects in this frame — keep plain image
 
-                    img = Image.open(frame_file).convert("RGBA")
+                    img = Image.open(frame_file).convert("RGB")
                     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                    draw = ImageDraw.Draw(overlay)
+                    img_draw = ImageDraw.Draw(img)
 
                     for mask_entry in frame_data["masks"]:
                         obj_id = mask_entry.get("object_id", 0)
-                        rle = mask_entry.get("mask")
+                        rle    = mask_entry.get("mask", {})
                         if not rle:
                             continue
-                        try:
-                            decoded = rle_decode({"counts": rle["counts"], "size": rle["size"]})
-                            color = COLORS[obj_id % len(COLORS)]
-                            mask_rgba = np.zeros((*decoded.shape, 4), dtype=np.uint8)
-                            mask_rgba[decoded > 0] = [*color, ALPHA]
-                            mask_img = Image.fromarray(mask_rgba, "RGBA")
-                            overlay = Image.alpha_composite(overlay, mask_img)
-                        except Exception as me:
-                            logger.warning(f"Could not apply mask obj {obj_id}: {me}")
 
-                    composited = Image.alpha_composite(img, overlay).convert("RGB")
+                        bbox = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
+                        if not bbox or len(bbox) < 4:
+                            continue
+
+                        bx, by, bw, bh = bbox
+                        x0, y0 = int(bx), int(by)
+                        x1, y1 = int(bx + bw), int(by + bh)
+                        color  = COLORS[obj_id % len(COLORS)]
+                        label  = label_map.get(obj_id, f"object_{obj_id}")
+
+                        # Semi-transparent fill
+                        draw.rectangle([x0, y0, x1, y1], fill=(*color, BOX_ALPHA))
+
+                        # Solid border
+                        for t in range(LINE_WIDTH):
+                            img_draw.rectangle(
+                                [x0 + t, y0 + t, x1 - t, y1 - t],
+                                outline=color,
+                            )
+
+                        # Label chip (top-left corner of box)
+                        font_size = max(14, img.height // 30)
+                        try:
+                            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                        except Exception:
+                            font = ImageFont.load_default()
+
+                        tb = font.getbbox(label) if hasattr(font, 'getbbox') else (0, 0, len(label) * 8, font_size)
+                        tw = tb[2] - tb[0] + 8
+                        th = tb[3] - tb[1] + 6
+                        lx0 = x0
+                        ly0 = max(0, y0 - th)
+                        draw.rectangle([lx0, ly0, lx0 + tw, ly0 + th], fill=(*color, 220))
+                        draw.text((lx0 + 4, ly0 + 3), label, fill=(255, 255, 255, 255), font=font)
+
+                    # Composite semi-transparent fill + labels onto image
+                    composited = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
                     composited.save(str(frame_file), "JPEG", quality=92)
 
             except ImportError as ie:
-                logger.warning(f"PIL/numpy not available for mask overlay: {ie}. Saving plain frames.")
+                logger.warning(f"PIL not available for bbox draw: {ie}. Saving plain frames.")
 
-        # ── Write per-frame JSON ──────────────────────────────────────────────
         for i, frame_file in enumerate(frame_files):
             extracted_sec = i / fps
             track_idx = int(round(extracted_sec * encode_fps))
             if tracking_data:
                 track_idx = min(track_idx, max(tracking_data.keys()))
 
-            frame_json = tracking_data.get(track_idx, {
-                "frame_index": track_idx,
-                "objects": objects_list,
-                "masks": [],
-                "note": "No mask data for this frame",
-            })
+            raw = tracking_data.get(track_idx)
+
+            # Get image dimensions
+            try:
+                from PIL import Image as _PILImg
+                with _PILImg.open(str(frame_file)) as _img:
+                    img_w, img_h = _img.size
+            except Exception:
+                img_w, img_h = 1280, 720
+
+            # Build LabelMe format JSON
+            shapes = []
+            if raw and raw.get("masks"):
+                for mask_entry in raw["masks"]:
+                    obj_id = mask_entry.get("object_id", 0)
+                    rle = mask_entry.get("mask", {})
+                    label = label_map.get(obj_id, f"object_{obj_id}")
+                    bbox = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
+                    points = bbox_to_points(bbox)
+                    if points:
+                        shapes.append({
+                            "label": label,
+                            "points": points,
+                            "group_id": None,
+                            "description": "",
+                            "shape_type": "rectangle",
+                            "flags": {},
+                        })
+
+            labelme_json = {
+                "version": "5.2.1",
+                "flags": {},
+                "shapes": shapes,
+                "imagePath": frame_file.name,
+                "imageData": img_to_b64(str(frame_file)),
+                "imageHeight": img_h,
+                "imageWidth": img_w,
+            }
+
             json_path = frames_dir / (frame_file.stem + ".json")
             with open(json_path, "w", encoding="utf-8") as jf:
-                json.dump(frame_json, jf, indent=2)
+                json.dump(labelme_json, jf, indent=2)
 
         return make_response({
             "success": True,
@@ -579,6 +719,137 @@ def extract_frames(project_name: str) -> Response:
     except Exception as e:
         logger.error(f"Error extracting frames for {project_name}: {e}")
         return make_response({"error": str(e)}, 500)
+
+@app.route("/prepare_session", methods=["POST"])
+def prepare_session() -> Response:
+    """
+    Encode a selected range of a raw uploaded video and start a SAM2 session.
+    Called after user selects crop range on the frontend.
+
+    Body JSON:
+      raw_path:   relative path to raw uploaded file (e.g. "uploads/raw_<hash>.mp4")
+      start_sec:  start time in seconds (default 0)
+      end_sec:    end time in seconds (default = full video)
+
+    Returns: { "success": bool, "path": str, "session_id": str (placeholder) }
+    The actual SAM2 session is started by the existing start_session GraphQL mutation.
+    """
+    import json, shutil, subprocess
+
+    try:
+        # Parse JSON body — handle both content-type variants
+        try:
+            body = request.get_json(force=True, silent=True) or {}
+            if not body:
+                body = json.loads(request.data.decode('utf-8') or '{}')
+        except Exception:
+            body = {}
+
+        raw_path = body.get("raw_path", "")
+        start_sec = float(body.get("start_sec", 0))
+        end_sec = body.get("end_sec", None)
+
+        if not raw_path:
+            return make_response({"error": "raw_path is required"}, 400)
+
+        # Resolve absolute path
+        full_raw_path = os.path.join(str(DATA_PATH), raw_path.lstrip("/"))
+        if not os.path.isfile(full_raw_path):
+            # Try relative to UPLOADS_PATH
+            full_raw_path = str(UPLOADS_PATH / os.path.basename(raw_path))
+        if not os.path.isfile(full_raw_path):
+            return make_response({"error": f"Raw file not found: {raw_path}"}, 404)
+
+        # Duration to encode
+        duration_sec = (end_sec - start_sec) if end_sec is not None else None
+        if duration_sec is not None and duration_sec <= 0:
+            return make_response({"error": "end_sec must be greater than start_sec"}, 400)
+
+        # Cap to MAX_UPLOAD_VIDEO_DURATION
+        from app_conf import MAX_UPLOAD_VIDEO_DURATION
+        if duration_sec is None or duration_sec > MAX_UPLOAD_VIDEO_DURATION:
+            duration_sec = MAX_UPLOAD_VIDEO_DURATION
+
+        # Get encode settings from env (same as transcoder)
+        import ast
+        from app_conf import FFMPEG_NUM_THREADS
+        fps_max = int(os.environ.get("VIDEO_ENCODE_FPS", "10"))
+        max_frames = int(os.environ.get("VIDEO_ENCODE_MAX_FRAMES", "300"))
+        max_w = int(os.environ.get("VIDEO_ENCODE_MAX_WIDTH", "640"))
+        max_h = int(os.environ.get("VIDEO_ENCODE_MAX_HEIGHT", "360"))
+        crf = int(os.environ.get("VIDEO_ENCODE_CRF", "28"))
+        codec = os.environ.get("VIDEO_ENCODE_CODEC", "libx264")
+
+        # Calculate fps so total frames ≤ max_frames
+        actual_duration = duration_sec or 30.0
+        ideal_fps = max_frames / actual_duration
+        fps = max(4, min(fps_max, int(ideal_fps)))
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return make_response({"error": "ffmpeg not found"}, 500)
+
+        # Output path: same as uploads but without "raw_" prefix
+        raw_basename = os.path.basename(full_raw_path)
+        encoded_basename = raw_basename.replace("raw_", "", 1)
+        encoded_path = str(UPLOADS_PATH / encoded_basename)
+
+        # Encode selected range
+        cmd = [
+            ffmpeg, "-y",
+            "-threads", str(FFMPEG_NUM_THREADS),
+            "-ss", str(start_sec),
+            "-t", str(duration_sec),
+            "-i", full_raw_path,
+            "-threads", str(FFMPEG_NUM_THREADS),
+            "-vf", f"fps={fps},scale={max_w}:{max_h},setsar=1:1",
+            "-c:v", codec,
+            "-preset", "ultrafast",
+            "-crf", str(crf),
+            "-pix_fmt", "yuv420p",
+            "-threads", str(FFMPEG_NUM_THREADS),
+            encoded_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            logger.error(f"prepare_session encode failed: {result.stderr}")
+            return make_response({"error": "Encoding failed", "details": result.stderr[-300:]}, 500)
+
+        # Return the encoded video path as "uploads/<filename>" 
+        # (relative to DATA_PATH, which is what startSession GraphQL mutation expects)
+        rel_path = f"{UPLOADS_PREFIX}/{encoded_basename}"
+
+        return make_response({
+            "success": True,
+            "path": rel_path,
+            "encoded_path": encoded_path,
+        }, 200)
+
+    except subprocess.TimeoutExpired:
+        return make_response({"error": "Encoding timed out"}, 500)
+    except Exception as e:
+        logger.error(f"prepare_session error: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/session_export_info/<session_id>", methods=["GET"])
+def session_export_info(session_id: str) -> Response:
+    """
+    Get the export project_name for an active session.
+    Returns: { "project_name": str } or 404 if not exported yet.
+    """
+    try:
+        session = inference_api._InferenceAPI__get_session(session_id)
+        export_folder = session.get("export_folder", "")
+        if not export_folder:
+            return make_response({"error": "Session not exported yet"}, 404)
+        project_name = os.path.basename(export_folder)
+        return make_response({"project_name": project_name}, 200)
+    except RuntimeError:
+        return make_response({"error": "Session not found"}, 404)
+    except Exception as e:
+        return make_response({"error": str(e)}, 500)
+
 
 @app.route("/frames_status/<project_name>", methods=["GET"])
 def frames_status(project_name: str) -> Response:

@@ -114,12 +114,23 @@ export default function ProjectHubPage() {
   const [modelSelected, setModelSelected] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<DraftProject | null>(null);
   const [extractModal, setExtractModal] = useState<{projectName: string; displayName: string; hasMasked: boolean} | null>(null);
+  const [cropModal, setCropModal] = useState<{video: any} | null>(null);
   const navigate = useNavigate();
   const setUploadingState = useSetAtom(uploadingStateAtom);
   const setSession        = useSetAtom(sessionAtom);
 
   const {getRootProps, getInputProps, isUploading, error} = useUploadVideo({
-    onUpload: v => { navigate('/demo', {state: {video: v}}); setUploadingState('default'); setSession(null); },
+    onUpload: v => {
+      setUploadingState('default');
+      setSession(null);
+      // If video has duration (raw upload), show crop selection first
+      if (v.durationSec && v.durationSec > 0) {
+        setCropModal({video: v});
+      } else {
+        // Fallback: old flow (already encoded)
+        navigate('/demo', {state: {video: v}});
+      }
+    },
     onUploadError: e => { setUploadingState('error'); Logger.error(e); },
     onUploadStart: () => setUploadingState('uploading'),
   });
@@ -482,6 +493,18 @@ export default function ProjectHubPage() {
           onClose={() => setExtractModal(null)}
         />
       )}
+
+      {/* ── Crop & Start Modal ── */}
+      {cropModal && (
+        <CropAndStartModal
+          video={cropModal.video}
+          onClose={() => setCropModal(null)}
+          onStart={(encodedVideo) => {
+            setCropModal(null);
+            navigate('/demo', {state: {video: encodedVideo}});
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -832,3 +855,270 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
   );
 }
 
+
+// ── Crop & Start Modal ──────────────────────────────────────────────
+function CropAndStartModal({video, onClose, onStart}: {
+  video: any;
+  onClose: () => void;
+  onStart: (encodedVideo: any) => void;
+}) {
+  const totalSec = video.durationSec ?? 60;
+  const [startSec, setStartSec] = useState(0);
+  const [endSec, setEndSec]     = useState(Math.min(totalSec, 30));
+  const [status, setStatus]     = useState<'idle'|'encoding'|'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState('');
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const dragging  = useRef<'start'|'end'|null>(null);
+
+  const HANDLE_W = 14;
+
+  function formatTime(s: number) {
+    const m = Math.floor(s / 60);
+    const sec = (s % 60).toFixed(1);
+    return m > 0 ? `${m}:${sec.padStart(4,'0')}` : `${Number(sec).toFixed(1)}s`;
+  }
+
+  const durSec   = endSec - startSec;
+  const startFrac = startSec / totalSec;
+  const endFrac   = endSec   / totalSec;
+
+  // Sync video to current position when handle released
+  function seekVideo(sec: number) {
+    if (videoRef.current) {
+      videoRef.current.currentTime = sec;
+    }
+  }
+
+  // Timeline pointer drag
+  useEffect(() => {
+    function getFrac(e: PointerEvent) {
+      const rect = timelineRef.current?.getBoundingClientRect();
+      if (!rect) return 0;
+      return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    }
+    function onMove(e: PointerEvent) {
+      if (!dragging.current) return;
+      const f = getFrac(e);
+      const sec = f * totalSec;
+      if (dragging.current === 'start') {
+        const s = Math.min(sec, endSec - 0.5);
+        setStartSec(Math.max(0, s));
+        if (videoRef.current) videoRef.current.currentTime = Math.max(0, s);
+      } else {
+        const s = Math.max(sec, startSec + 0.5);
+        setEndSec(Math.min(totalSec, s));
+        if (videoRef.current) videoRef.current.currentTime = Math.min(totalSec, s);
+      }
+    }
+    function onUp() { dragging.current = null; }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+  }, [startSec, endSec, totalSec]);
+
+  async function handleStart() {
+    setStatus('encoding');
+    setErrorMsg('');
+    try {
+      const r = await fetch('http://localhost:7263/prepare_session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({raw_path: video.path, start_sec: startSec, end_sec: endSec}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) { setErrorMsg(d.error || 'Encoding failed'); setStatus('error'); return; }
+      onStart({...video, path: d.path, url: `http://localhost:7263/${d.path}`, durationSec: durSec});
+    } catch {
+      setErrorMsg('Network error — is the backend running?');
+      setStatus('error');
+    }
+  }
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, zIndex:999,
+      background:'rgba(0,0,0,0.88)', backdropFilter:'blur(8px)',
+      display:'flex', alignItems:'center', justifyContent:'center', padding:24,
+    }} onClick={e => { if (e.target===e.currentTarget) onClose(); }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{
+        background:'#13151C', border:'1px solid rgba(255,255,255,0.1)',
+        borderRadius:20, padding:'28px 32px',
+        width:'100%', maxWidth:600,
+        boxShadow:'0 24px 64px rgba(0,0,0,0.7)',
+        display:'flex', flexDirection:'column', gap:20,
+      }}>
+
+        {/* Header */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontSize:17, fontWeight:700, color:'#F0F2F7'}}>✂️ Select clip range</div>
+            <div style={{fontSize:12, color:'rgba(240,242,247,0.35)', marginTop:2}}>
+              Drag handles on the timeline · Only selected clip gets encoded
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:'rgba(255,255,255,0.06)',border:'none',width:32,height:32,borderRadius:8,color:'rgba(255,255,255,0.5)',fontSize:16,cursor:'pointer'}}>✕</button>
+        </div>
+
+        {/* Video preview */}
+        <div style={{borderRadius:12, overflow:'hidden', background:'#000', aspectRatio:'16/9', position:'relative'}}>
+          <video
+            ref={videoRef}
+            src={`http://localhost:7263/${video.path}`}
+            style={{width:'100%', height:'100%', objectFit:'contain'}}
+            muted preload="auto"
+          />
+          {/* Play/pause overlay */}
+          <div
+            onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
+            style={{
+              position:'absolute', bottom:10, left:'50%', transform:'translateX(-50%)',
+              background:'rgba(0,0,0,0.55)', borderRadius:20, padding:'5px 16px',
+              fontSize:12, color:'rgba(255,255,255,0.8)', cursor:'pointer',
+              userSelect:'none',
+            }}>
+            ▶ / ⏸ click to play/pause
+          </div>
+        </div>
+
+        {/* Timeline with drag handles */}
+        <div>
+          {/* Time labels */}
+          <div style={{display:'flex', justifyContent:'space-between', fontSize:10, color:'rgba(255,255,255,0.3)', marginBottom:6}}>
+            <span>0:00</span>
+            <span style={{color:'#a5b4fc', fontWeight:700}}>
+              {formatTime(startSec)} → {formatTime(endSec)} &nbsp;·&nbsp; {formatTime(durSec)} selected
+            </span>
+            <span>{formatTime(totalSec)}</span>
+          </div>
+
+          {/* Timeline bar */}
+          <div
+            ref={timelineRef}
+            style={{
+              position:'relative', height:48, borderRadius:8,
+              background:'rgba(255,255,255,0.06)',
+              userSelect:'none',
+            }}
+            onClick={e => {
+              // Click to seek preview
+              const rect = timelineRef.current?.getBoundingClientRect();
+              if (!rect) return;
+              const f = (e.clientX - rect.left) / rect.width;
+              if (videoRef.current) videoRef.current.currentTime = f * totalSec;
+            }}
+          >
+            {/* Dim left */}
+            <div style={{position:'absolute', top:0, bottom:0, left:0, width:`${startFrac*100}%`, background:'rgba(0,0,0,0.5)', pointerEvents:'none'}} />
+            {/* Dim right */}
+            <div style={{position:'absolute', top:0, bottom:0, right:0, width:`${(1-endFrac)*100}%`, background:'rgba(0,0,0,0.5)', pointerEvents:'none'}} />
+            {/* Selection fill */}
+            <div style={{
+              position:'absolute', top:0, bottom:0,
+              left:`${startFrac*100}%`, width:`${(endFrac-startFrac)*100}%`,
+              background:'rgba(99,102,241,0.2)',
+              borderTop:'2px solid #6366f1', borderBottom:'2px solid #6366f1',
+              pointerEvents:'none',
+            }} />
+
+            {/* Duration badge */}
+            <div style={{
+              position:'absolute', top:'50%', transform:'translateY(-50%)',
+              left:`${startFrac*100}%`, width:`${(endFrac-startFrac)*100}%`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              pointerEvents:'none',
+            }}>
+              <span style={{fontSize:11,fontWeight:700,color:'#a5b4fc',background:'rgba(13,15,22,0.85)',padding:'2px 8px',borderRadius:6}}>
+                {formatTime(durSec)}
+              </span>
+            </div>
+
+            {/* ── Left handle ── */}
+            <div
+              onPointerDown={e => { e.stopPropagation(); dragging.current = 'start'; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
+              onClick={e => e.stopPropagation()}
+              style={{
+                position:'absolute', top:0, bottom:0,
+                left:`calc(${startFrac*100}% - ${HANDLE_W/2}px)`,
+                width:HANDLE_W,
+                background:'#6366f1', borderRadius:'4px 0 0 4px',
+                cursor:'ew-resize', zIndex:10,
+                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+              }}>
+              {[0,1,2].map(i => <div key={i} style={{width:2,height:8,borderRadius:1,background:'rgba(255,255,255,0.6)'}} />)}
+              <div style={{
+                position:'absolute', bottom:'110%', left:'50%', transform:'translateX(-50%)',
+                background:'#1e1f26', color:'#818cf8', fontSize:10, fontWeight:700,
+                padding:'2px 6px', borderRadius:4, whiteSpace:'nowrap',
+                border:'1px solid rgba(99,102,241,0.4)',
+              }}>{formatTime(startSec)}</div>
+            </div>
+
+            {/* ── Right handle ── */}
+            <div
+              onPointerDown={e => { e.stopPropagation(); dragging.current = 'end'; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
+              onClick={e => e.stopPropagation()}
+              style={{
+                position:'absolute', top:0, bottom:0,
+                left:`calc(${endFrac*100}% - ${HANDLE_W/2}px)`,
+                width:HANDLE_W,
+                background:'#6366f1', borderRadius:'0 4px 4px 0',
+                cursor:'ew-resize', zIndex:10,
+                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+              }}>
+              {[0,1,2].map(i => <div key={i} style={{width:2,height:8,borderRadius:1,background:'rgba(255,255,255,0.6)'}} />)}
+              <div style={{
+                position:'absolute', bottom:'110%', left:'50%', transform:'translateX(-50%)',
+                background:'#1e1f26', color:'#818cf8', fontSize:10, fontWeight:700,
+                padding:'2px 6px', borderRadius:4, whiteSpace:'nowrap',
+                border:'1px solid rgba(99,102,241,0.4)',
+              }}>{formatTime(endSec)}</div>
+            </div>
+          </div>
+
+          {/* Seek buttons */}
+          <div style={{display:'flex', gap:8, marginTop:10}}>
+            <button onClick={() => seekVideo(startSec)} style={{
+              flex:1, padding:'7px 0', fontSize:12, fontWeight:600,
+              background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.25)',
+              borderRadius:8, color:'#a5b4fc', cursor:'pointer',
+            }}>⏮ Preview start</button>
+            <button onClick={() => seekVideo(endSec)} style={{
+              flex:1, padding:'7px 0', fontSize:12, fontWeight:600,
+              background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.25)',
+              borderRadius:8, color:'#a5b4fc', cursor:'pointer',
+            }}>Preview end ⏭</button>
+          </div>
+        </div>
+
+        {/* Error */}
+        {status === 'error' && (
+          <div style={{padding:'10px 14px', borderRadius:10, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', fontSize:12, color:'#fca5a5'}}>
+            ⚠️ {errorMsg}
+          </div>
+        )}
+
+        {/* Start button */}
+        <button
+          onClick={handleStart} disabled={status==='encoding'}
+          style={{
+            width:'100%', padding:'14px 0',
+            background: status==='encoding' ? 'rgba(99,102,241,0.4)' : '#6366f1',
+            border:'none', borderRadius:12,
+            color:'#fff', fontSize:15, fontWeight:700,
+            cursor: status==='encoding' ? 'not-allowed' : 'pointer',
+            boxShadow:'0 4px 16px rgba(99,102,241,0.3)',
+            display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+          }}>
+          {status==='encoding' ? (
+            <>
+              <span style={{width:16,height:16,borderRadius:'50%',border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',animation:'spin 0.7s linear infinite',display:'inline-block'}} />
+              Encoding {formatTime(durSec)} clip...
+            </>
+          ) : <>▶ Start Tracking ({formatTime(durSec)})</>}
+        </button>
+      </div>
+    </div>
+  );
+}
