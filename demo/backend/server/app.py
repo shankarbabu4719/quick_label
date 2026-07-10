@@ -562,14 +562,6 @@ def extract_frames(project_name: str) -> Response:
             x, y, w, h = bbox
             return [[round(x, 2), round(y, 2)], [round(x + w, 2), round(y + h, 2)]]
 
-        def img_to_b64(path: str) -> str:
-            """Encode image to base64 string."""
-            import base64
-            try:
-                with open(path, "rb") as f:
-                    return base64.b64encode(f.read()).decode("utf-8")
-            except Exception:
-                return ""
 
         # Build label lookup: object_id → label
         label_map = {obj["object_id"]: obj.get("label", f"object_{obj['object_id']}") for obj in objects_list}
@@ -698,7 +690,7 @@ def extract_frames(project_name: str) -> Response:
                 "flags": {},
                 "shapes": shapes,
                 "imagePath": frame_file.name,
-                "imageData": img_to_b64(str(frame_file)),
+                "imageData": None,
                 "imageHeight": img_h,
                 "imageWidth": img_w,
             }
