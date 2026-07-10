@@ -53,7 +53,7 @@ source venv/bin/activate
 # ── Install Python deps if needed ────────────────────────────
 if ! python -c "import sam2" &>/dev/null 2>&1; then
   echo "📦 Installing Python dependencies (first time ~5 min)..."
-  pip install -q -e ".[demo]"
+  pip install -q -e ".[interactive-demo]"
 fi
 
 # ── Checkpoints ──────────────────────────────────────────────
