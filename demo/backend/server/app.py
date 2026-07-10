@@ -703,12 +703,21 @@ def extract_frames(project_name: str) -> Response:
                             f"{class_id} {x_center:.6f} {y_center:.6f} {w_norm:.6f} {h_norm:.6f}"
                         )
 
+            # Encode image as base64 for LabelMe imageData field
+            # (required by labelme2yolo which calls utils.img_b64_to_arr(imageData))
+            import base64
+            try:
+                with open(str(frame_file), "rb") as _imgf:
+                    image_data_b64 = base64.b64encode(_imgf.read()).decode("utf-8")
+            except Exception:
+                image_data_b64 = None
+
             labelme_json = {
                 "version": "5.2.1",
                 "flags": {},
                 "shapes": shapes,
                 "imagePath": frame_file.name,
-                "imageData": None,
+                "imageData": image_data_b64,
                 "imageHeight": img_h,
                 "imageWidth": img_w,
             }
