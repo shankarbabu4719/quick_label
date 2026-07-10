@@ -656,14 +656,14 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
   const [fps, setFps] = useState('1');
   const [source, setSource] = useState<'original' | 'masked'>('original');
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [result, setResult] = useState<{
-    frameCount: number; framesDir: string; alreadyExists: boolean;
-    trainCount?: number; valCount?: number; yoloSplit?: boolean;
-  } | null>(null);
+  const [result, setResult] = useState<{frameCount: number; framesDir: string; alreadyExists: boolean} | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
-  // YOLO split options
-  const [yoloSplit, setYoloSplit] = useState(false);
-  const [valPct, setValPct] = useState(20); // default 20 %
+
+  // YOLO convert state (shown after extract success)
+  const [yoloStatus, setYoloStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [yoloResult, setYoloResult] = useState<{trainCount: number; valCount: number; yoloDir: string} | null>(null);
+  const [yoloError, setYoloError] = useState('');
+  const [valPct, setValPct] = useState(20);
 
   const FPS_OPTIONS = [
     {value: '0.5', label: '0.5 fps — 1 frame every 2s'},
@@ -678,13 +678,10 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
     setStatus('loading');
     setErrorMsg('');
     try {
-      const body: Record<string, unknown> = {fps: parseFloat(fps), source};
-      if (yoloSplit) body.val_size = valPct / 100;
-
       const r = await fetch(`http://localhost:7263/extract_frames/${projectName}`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body),
+        body: JSON.stringify({fps: parseFloat(fps), source}),
       });
       const d = await r.json();
       if (!r.ok || !d.success) {
@@ -692,18 +689,35 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
         setStatus('error');
         return;
       }
-      setResult({
-        frameCount: d.frame_count,
-        framesDir: d.frames_dir,
-        alreadyExists: d.already_exists,
-        trainCount: d.train_count,
-        valCount: d.val_count,
-        yoloSplit: d.yolo_split,
-      });
+      setResult({frameCount: d.frame_count, framesDir: d.frames_dir, alreadyExists: d.already_exists});
       setStatus('success');
     } catch (e) {
       setErrorMsg('Network error — is the backend running?');
       setStatus('error');
+    }
+  }
+
+  async function handleYoloConvert() {
+    if (!result) return;
+    setYoloStatus('loading');
+    setYoloError('');
+    try {
+      const r = await fetch(`http://localhost:7263/labelme2yolo/${projectName}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({frames_dir: result.framesDir, val_size: valPct / 100}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setYoloError(d.error || 'Conversion failed');
+        setYoloStatus('error');
+        return;
+      }
+      setYoloResult({trainCount: d.train_count, valCount: d.val_count, yoloDir: d.yolo_dir});
+      setYoloStatus('success');
+    } catch (e) {
+      setYoloError('Network error — is the backend running?');
+      setYoloStatus('error');
     }
   }
 
@@ -788,118 +802,6 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
               </div>
             </div>
 
-            {/* ── YOLO Dataset Split ── */}
-            <div style={{marginBottom:24}}>
-              <div style={{fontSize:12, fontWeight:600, color:'rgba(240,242,247,0.5)', marginBottom:10, letterSpacing:'0.05em', textTransform:'uppercase'}}>YOLO Dataset Export</div>
-
-              {/* Toggle */}
-              <button
-                onClick={() => setYoloSplit(v => !v)}
-                style={{
-                  width:'100%', padding:'11px 14px',
-                  borderRadius:10, cursor:'pointer',
-                  border:`1px solid ${yoloSplit ? 'rgba(99,102,241,0.5)' : 'rgba(255,255,255,0.08)'}`,
-                  background: yoloSplit ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
-                  display:'flex', alignItems:'center', justifyContent:'space-between',
-                  transition:'all 0.15s',
-                }}>
-                <div style={{display:'flex', alignItems:'center', gap:10}}>
-                  <span style={{fontSize:16}}>🗂</span>
-                  <div style={{textAlign:'left'}}>
-                    <div style={{fontSize:13, fontWeight:600, color: yoloSplit ? '#a5b4fc' : 'rgba(240,242,247,0.7)'}}>
-                      Train / Val Split
-                    </div>
-                    <div style={{fontSize:11, color:'rgba(240,242,247,0.35)', marginTop:2}}>
-                      images/train · images/val · labels/train · labels/val · dataset.yaml
-                    </div>
-                  </div>
-                </div>
-                {/* Toggle pill */}
-                <div style={{
-                  width:36, height:20, borderRadius:10, position:'relative',
-                  background: yoloSplit ? '#6366f1' : 'rgba(255,255,255,0.12)',
-                  transition:'background 0.2s', flexShrink:0,
-                }}>
-                  <div style={{
-                    position:'absolute', top:3,
-                    left: yoloSplit ? 19 : 3,
-                    width:14, height:14, borderRadius:'50%',
-                    background:'#fff', transition:'left 0.2s',
-                  }} />
-                </div>
-              </button>
-
-              {/* Val % slider — shown when split is ON */}
-              {yoloSplit && (
-                <div style={{
-                  marginTop:12, padding:'14px 16px',
-                  background:'rgba(99,102,241,0.06)',
-                  border:'1px solid rgba(99,102,241,0.2)',
-                  borderRadius:10,
-                }}>
-                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
-                    <span style={{fontSize:12, fontWeight:600, color:'rgba(240,242,247,0.55)'}}>Validation size</span>
-                    <div style={{display:'flex', alignItems:'center', gap:8}}>
-                      <span style={{
-                        fontSize:13, fontWeight:700, color:'#a5b4fc',
-                        background:'rgba(99,102,241,0.15)',
-                        padding:'2px 10px', borderRadius:6,
-                      }}>
-                        val {valPct}% · train {100 - valPct}%
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Preset buttons */}
-                  <div style={{display:'flex', gap:6, marginBottom:12}}>
-                    {[10, 15, 20, 25, 30].map(v => (
-                      <button
-                        key={v}
-                        onClick={() => setValPct(v)}
-                        style={{
-                          flex:1, padding:'6px 0', fontSize:12, fontWeight:600,
-                          borderRadius:7, cursor:'pointer', border:'none',
-                          background: valPct === v ? '#6366f1' : 'rgba(255,255,255,0.07)',
-                          color: valPct === v ? '#fff' : 'rgba(240,242,247,0.5)',
-                          transition:'all 0.15s',
-                        }}>
-                        {v}%
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Slider */}
-                  <input
-                    type="range" min={5} max={50} step={5}
-                    value={valPct}
-                    onChange={e => setValPct(Number(e.target.value))}
-                    style={{width:'100%', accentColor:'#6366f1', cursor:'pointer'}}
-                  />
-                  <div style={{display:'flex', justifyContent:'space-between', fontSize:10, color:'rgba(240,242,247,0.25)', marginTop:4}}>
-                    <span>5% val</span>
-                    <span>50% val</span>
-                  </div>
-
-                  {/* Structure preview */}
-                  <div style={{
-                    marginTop:12, padding:'10px 12px',
-                    background:'rgba(0,0,0,0.3)', borderRadius:8,
-                    fontFamily:'monospace', fontSize:11,
-                    color:'rgba(240,242,247,0.45)', lineHeight:1.7,
-                  }}>
-                    <div style={{color:'#a5b4fc', fontWeight:700, marginBottom:4}}>📁 Output structure</div>
-                    <div>frames_{fps}fps_{source}_yolo_val{valPct}/</div>
-                    <div>&nbsp;&nbsp;├─ images/train/ &nbsp;({100-valPct}% frames)</div>
-                    <div>&nbsp;&nbsp;├─ images/val/ &nbsp;&nbsp;({valPct}% frames)</div>
-                    <div>&nbsp;&nbsp;├─ labels/train/ &nbsp;(.txt YOLO)</div>
-                    <div>&nbsp;&nbsp;├─ labels/val/ &nbsp;&nbsp;(.txt YOLO)</div>
-                    <div>&nbsp;&nbsp;├─ classes.txt</div>
-                    <div>&nbsp;&nbsp;└─ dataset.yaml</div>
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Error */}
             {status === 'error' && (
               <div style={{
@@ -941,57 +843,123 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
             </button>
           </>
         ) : (
-          /* Success state */
-          <div style={{textAlign:'center', padding:'8px 0'}}>
-            <div style={{fontSize:48, marginBottom:16}}>✅</div>
-            <div style={{fontSize:18, fontWeight:700, color:'#F0F2F7', marginBottom:8}}>
-              {result?.alreadyExists ? 'Already extracted!' : result?.yoloSplit ? 'YOLO dataset ready!' : 'Frames extracted!'}
-            </div>
-            <div style={{fontSize:13, color:'rgba(240,242,247,0.5)', marginBottom:16, lineHeight:1.6}}>
-              <strong style={{color:'#a5b4fc'}}>{result?.frameCount}</strong> frames saved to<br/>
-              <code style={{
-                fontSize:11, background:'rgba(255,255,255,0.06)',
-                padding:'3px 8px', borderRadius:6, color:'rgba(240,242,247,0.7)',
-              }}>
-                exports/{projectName}/{result?.framesDir}/
-              </code>
+          /* ── Success: frames extracted ── */
+          <div style={{padding:'4px 0'}}>
+            {/* Extracted info */}
+            <div style={{
+              display:'flex', alignItems:'center', gap:12, marginBottom:20,
+              padding:'12px 16px', borderRadius:12,
+              background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)',
+            }}>
+              <span style={{fontSize:28}}>✅</span>
+              <div>
+                <div style={{fontSize:14, fontWeight:700, color:'#F0F2F7'}}>
+                  {result?.alreadyExists ? 'Already extracted!' : 'Frames extracted!'}
+                </div>
+                <div style={{fontSize:12, color:'rgba(240,242,247,0.5)', marginTop:2}}>
+                  <strong style={{color:'#86efac'}}>{result?.frameCount}</strong> frames →{' '}
+                  <code style={{fontSize:11, color:'rgba(240,242,247,0.55)'}}>
+                    exports/{projectName}/{result?.framesDir}/
+                  </code>
+                </div>
+              </div>
             </div>
 
-            {/* YOLO split stats */}
-            {result?.yoloSplit && (
+            {/* ── YOLO Convert section ── */}
+            {yoloStatus !== 'success' ? (
               <div style={{
-                marginBottom:16, padding:'12px 16px', borderRadius:10,
-                background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.2)',
-                fontSize:12, color:'#a5b4fc', lineHeight:1.8,
+                padding:'18px', marginBottom:20,
+                background:'rgba(99,102,241,0.06)',
+                border:'1px solid rgba(99,102,241,0.18)',
+                borderRadius:14,
               }}>
-                <div style={{fontWeight:700, marginBottom:6}}>🗂 YOLO Dataset Split</div>
-                <div style={{display:'flex', justifyContent:'center', gap:24}}>
+                <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:14}}>
+                  <span style={{fontSize:18}}>🗂</span>
                   <div>
-                    <div style={{fontSize:20, fontWeight:800, color:'#6366f1'}}>{result.trainCount}</div>
-                    <div style={{color:'rgba(240,242,247,0.4)', fontSize:11}}>train</div>
-                  </div>
-                  <div style={{color:'rgba(240,242,247,0.2)', fontSize:20, alignSelf:'center'}}>·</div>
-                  <div>
-                    <div style={{fontSize:20, fontWeight:800, color:'#818cf8'}}>{result.valCount}</div>
-                    <div style={{color:'rgba(240,242,247,0.4)', fontSize:11}}>val</div>
+                    <div style={{fontSize:14, fontWeight:700, color:'#a5b4fc'}}>Convert to YOLO Dataset</div>
+                    <div style={{fontSize:11, color:'rgba(240,242,247,0.35)', marginTop:1}}>
+                      Uses <code style={{fontSize:10}}>labelme2yolo</code> · images/ · labels/ · dataset.yaml
+                    </div>
                   </div>
                 </div>
-                <div style={{marginTop:8, fontFamily:'monospace', fontSize:10, color:'rgba(240,242,247,0.35)'}}>
-                  images/ · labels/ · classes.txt · dataset.yaml
+
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                  <span style={{fontSize:12, fontWeight:600, color:'rgba(240,242,247,0.5)'}}>Validation size</span>
+                  <span style={{fontSize:13, fontWeight:700, color:'#a5b4fc', background:'rgba(99,102,241,0.15)', padding:'2px 10px', borderRadius:6}}>
+                    val {valPct}% &nbsp;·&nbsp; train {100 - valPct}%
+                  </span>
+                </div>
+
+                <div style={{display:'flex', gap:6, marginBottom:10}}>
+                  {[10, 15, 20, 25, 30].map(v => (
+                    <button key={v} onClick={() => setValPct(v)} style={{
+                      flex:1, padding:'6px 0', fontSize:12, fontWeight:600,
+                      borderRadius:7, cursor:'pointer', border:'none',
+                      background: valPct === v ? '#6366f1' : 'rgba(255,255,255,0.07)',
+                      color: valPct === v ? '#fff' : 'rgba(240,242,247,0.5)',
+                      transition:'all 0.15s',
+                    }}>{v}%</button>
+                  ))}
+                </div>
+
+                <input type="range" min={5} max={50} step={5} value={valPct}
+                  onChange={e => setValPct(Number(e.target.value))}
+                  style={{width:'100%', accentColor:'#6366f1', cursor:'pointer', marginBottom:4}} />
+                <div style={{display:'flex', justifyContent:'space-between', fontSize:10, color:'rgba(240,242,247,0.25)', marginBottom:14}}>
+                  <span>5% val</span><span>50% val</span>
+                </div>
+
+                {yoloStatus === 'error' && (
+                  <div style={{marginBottom:12, padding:'8px 12px', borderRadius:8, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', fontSize:12, color:'#fca5a5'}}>
+                    ⚠️ {yoloError}
+                  </div>
+                )}
+
+                <button onClick={handleYoloConvert} disabled={yoloStatus === 'loading'} style={{
+                  width:'100%', padding:'11px 0',
+                  background: yoloStatus === 'loading' ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                  border:'none', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700,
+                  cursor: yoloStatus === 'loading' ? 'not-allowed' : 'pointer',
+                  boxShadow:'0 3px 12px rgba(99,102,241,0.3)',
+                  display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+                }}>
+                  {yoloStatus === 'loading' ? (
+                    <>
+                      <span style={{width:13, height:13, borderRadius:'50%', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', animation:'spin 0.7s linear infinite', display:'inline-block'}} />
+                      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                      Converting with labelme2yolo...
+                    </>
+                  ) : <>🗂 Convert to YOLO (val {valPct}%)</>}
+                </button>
+              </div>
+            ) : (
+              <div style={{padding:'16px 18px', marginBottom:20, background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.25)', borderRadius:14}}>
+                <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:12}}>
+                  <span style={{fontSize:20}}>🎉</span>
+                  <div style={{fontSize:14, fontWeight:700, color:'#a5b4fc'}}>YOLO Dataset Ready!</div>
+                </div>
+                <div style={{display:'flex', justifyContent:'center', gap:28, marginBottom:12}}>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:22, fontWeight:800, color:'#6366f1'}}>{yoloResult?.trainCount}</div>
+                    <div style={{fontSize:11, color:'rgba(240,242,247,0.4)'}}>train</div>
+                  </div>
+                  <div style={{color:'rgba(240,242,247,0.15)', fontSize:22, alignSelf:'center'}}>·</div>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:22, fontWeight:800, color:'#818cf8'}}>{yoloResult?.valCount}</div>
+                    <div style={{fontSize:11, color:'rgba(240,242,247,0.4)'}}>val</div>
+                  </div>
+                </div>
+                <div style={{fontFamily:'monospace', fontSize:11, color:'rgba(240,242,247,0.4)', lineHeight:1.8, padding:'8px 10px', background:'rgba(0,0,0,0.25)', borderRadius:8}}>
+                  <div style={{color:'#818cf8', fontWeight:700, marginBottom:2}}>📁 {yoloResult?.yoloDir}/</div>
+                  <div>&nbsp;&nbsp;├─ images/train/ &nbsp;&nbsp;images/val/</div>
+                  <div>&nbsp;&nbsp;├─ labels/train/ &nbsp;&nbsp;labels/val/</div>
+                  <div>&nbsp;&nbsp;└─ dataset.yaml</div>
                 </div>
               </div>
             )}
 
-            <div style={{
-              padding:'10px 14px', borderRadius:10,
-              background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)',
-              fontSize:12, color:'#86efac', marginBottom:20, lineHeight:1.5,
-            }}>
-              📁 Frames are saved locally on the server.<br/>
-              Find them in the <strong>demo/data/exports/</strong> folder.
-            </div>
             <div style={{display:'flex', gap:10}}>
-              <button onClick={() => { setStatus('idle'); setResult(null); }} style={{
+              <button onClick={() => { setStatus('idle'); setResult(null); setYoloStatus('idle'); setYoloResult(null); }} style={{
                 flex:1, padding:'10px 0', borderRadius:10,
                 background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)',
                 color:'rgba(240,242,247,0.7)', fontSize:13, fontWeight:600, cursor:'pointer',
