@@ -650,6 +650,9 @@ def extract_frames(project_name: str) -> Response:
             except ImportError as ie:
                 logger.warning(f"PIL not available for bbox draw: {ie}. Saving plain frames.")
 
+        # Build class index: object_id → class_id (0-based, ordered by objects_list)
+        class_id_map = {obj["object_id"]: idx for idx, obj in enumerate(objects_list)}
+
         for i, frame_file in enumerate(frame_files):
             extracted_sec = i / fps
             track_idx = int(round(extracted_sec * encode_fps))
@@ -666,16 +669,20 @@ def extract_frames(project_name: str) -> Response:
             except Exception:
                 img_w, img_h = 1280, 720
 
-            # Build LabelMe format JSON
+            # Build LabelMe format JSON + YOLO txt simultaneously
             shapes = []
+            yolo_lines = []
+
             if raw and raw.get("masks"):
                 for mask_entry in raw["masks"]:
                     obj_id = mask_entry.get("object_id", 0)
-                    rle = mask_entry.get("mask", {})
-                    label = label_map.get(obj_id, f"object_{obj_id}")
-                    bbox = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
+                    rle    = mask_entry.get("mask", {})
+                    label  = label_map.get(obj_id, f"object_{obj_id}")
+                    bbox   = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
                     points = bbox_to_points(bbox)
+
                     if points:
+                        # LabelMe shape
                         shapes.append({
                             "label": label,
                             "points": points,
@@ -684,6 +691,17 @@ def extract_frames(project_name: str) -> Response:
                             "shape_type": "rectangle",
                             "flags": {},
                         })
+
+                        # YOLO line: class_id x_center y_center width height (normalized)
+                        bx, by, bw, bh = bbox
+                        x_center = (bx + bw / 2.0) / img_w
+                        y_center = (by + bh / 2.0) / img_h
+                        w_norm   = bw / img_w
+                        h_norm   = bh / img_h
+                        class_id = class_id_map.get(obj_id, obj_id)
+                        yolo_lines.append(
+                            f"{class_id} {x_center:.6f} {y_center:.6f} {w_norm:.6f} {h_norm:.6f}"
+                        )
 
             labelme_json = {
                 "version": "5.2.1",
@@ -698,6 +716,20 @@ def extract_frames(project_name: str) -> Response:
             json_path = frames_dir / (frame_file.stem + ".json")
             with open(json_path, "w", encoding="utf-8") as jf:
                 json.dump(labelme_json, jf, indent=2)
+
+            # Write YOLO .txt (empty file when no objects in frame)
+            txt_path = frames_dir / (frame_file.stem + ".txt")
+            with open(txt_path, "w", encoding="utf-8") as tf:
+                tf.write("\n".join(yolo_lines))
+
+        # Write classes.txt — YOLO class name list (index = class_id)
+        classes_path = frames_dir / "classes.txt"
+        class_names = [
+            label_map.get(obj["object_id"], f"object_{obj['object_id']}")
+            for obj in objects_list
+        ]
+        with open(classes_path, "w", encoding="utf-8") as cf:
+            cf.write("\n".join(class_names))
 
         return make_response({
             "success": True,
