@@ -91,7 +91,7 @@ export default function MoreOptionsToolbar({onTabChange}: Props) {
           </div>
         </div>
 
-        {/* Frame extract section */}
+        {/* Frame extract + YOLO section */}
         <div style={{
           background: 'rgba(255,255,255,0.04)',
           border: '1px solid rgba(255,255,255,0.07)',
@@ -101,7 +101,7 @@ export default function MoreOptionsToolbar({onTabChange}: Props) {
             fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.3)',
             letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 12,
           }}>
-            Frame Extraction
+            Frame Extraction & YOLO Export
           </div>
           <ExtractFramesOption />
         </div>

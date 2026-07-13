@@ -318,6 +318,9 @@ def list_exports() -> Response:
         for folder in EXPORTS_PATH.iterdir():
             if not folder.is_dir():
                 continue
+            # Skip internal folders (_merged_training, _yolo_runs, etc.)
+            if folder.name.startswith('_'):
+                continue
 
             export_info = {
                 "name": folder.name,
@@ -502,19 +505,90 @@ def extract_frames(project_name: str) -> Response:
         frame_count = len(frame_files)
         logger.info(f"Extracted {frame_count} frames to {frames_dir}")
 
-        # ── Apply mask color overlays for "masked" source ─────────────────────
+        # ── Helper functions (defined before use) ────────────────────────────
+
+        def rle_to_bbox(rle_counts, size: list) -> list:
+            """
+            Convert COCO RLE mask to [x, y, w, h] bounding box.
+            counts can be a decoded string (as stored by SAM2 predictor) or bytes.
+            size = [height, width].
+            """
+            if not rle_counts or not size or len(size) < 2:
+                return []
+            try:
+                from pycocotools.mask import toBbox
+                bbox = toBbox({"counts": rle_counts, "size": list(size)})
+                return [round(float(v), 2) for v in bbox]
+            except Exception as _e:
+                logger.warning(f"rle_to_bbox (pycocotools) failed: {_e}")
+
+            # Pure-Python fallback: decode RLE run-lengths (column-major order)
+            try:
+                h, w = int(size[0]), int(size[1])
+                counts = rle_counts
+                if isinstance(counts, (bytes, bytearray)):
+                    counts = counts.decode("utf-8", errors="replace")
+                if not isinstance(counts, str):
+                    return []
+                runs = list(map(int, counts.split()))
+                min_row, max_row = h, -1
+                min_col, max_col = w, -1
+                pixel = 0
+                value = 0
+                for run in runs:
+                    if value == 1 and run > 0:
+                        col_s = pixel // h
+                        row_s = pixel % h
+                        col_e = (pixel + run - 1) // h
+                        row_e = (pixel + run - 1) % h
+                        min_col = min(min_col, col_s)
+                        max_col = max(max_col, col_e)
+                        if col_s == col_e:
+                            min_row = min(min_row, row_s)
+                            max_row = max(max_row, row_e)
+                        else:
+                            min_row = min(min_row, row_s, 0)
+                            max_row = max(max_row, row_e, h - 1)
+                    pixel += run
+                    value = 1 - value
+                if max_col < 0:
+                    return []
+                return [min_col, min_row, max_col - min_col + 1, max_row - min_row + 1]
+            except Exception as _e2:
+                logger.warning(f"rle_to_bbox (pure-python) failed: {_e2}")
+                return []
+
+        def bbox_to_points(bbox: list) -> list:
+            """Convert [x, y, w, h] to LabelMe rectangle [[x1,y1],[x2,y2]]."""
+            if not bbox or len(bbox) < 4:
+                return []
+            x, y, w, h = bbox
+            return [[round(x, 2), round(y, 2)], [round(x + w, 2), round(y + h, 2)]]
+
+
+        # Build label lookup: object_id → label
+        label_map = {obj["object_id"]: obj.get("label", f"object_{obj['object_id']}") for obj in objects_list}
+
+        # ── Draw bounding boxes on frames for "masked" source ────────────────
         if source == "masked" and tracking_data:
             try:
-                import numpy as np
-                from PIL import Image
-                from pycocotools.mask import decode as rle_decode
+                from PIL import Image, ImageDraw, ImageFont
 
+                # Same 10 colors as the frontend THEME_COLORS
                 COLORS = [
-                    (99, 102, 241), (34, 197, 94), (245, 158, 11), (239, 68, 68),
-                    (16, 185, 129), (139, 92, 246), (236, 72, 153), (14, 165, 233),
-                    (249, 115, 22), (160, 255, 80),
+                    (56, 128, 243),   # #3880F3
+                    (240, 170,  25),  # #F0AA19
+                    (  0, 210, 190),  # #00D2BE
+                    ( 40, 210,  50),  # #28D232
+                    (135, 115, 255),  # #8773FF
+                    (  0, 200, 240),  # #00C8F0
+                    (250, 135,  25),  # #FA8719
+                    (230,  25,  59),  # #E6193B
+                    (250, 125, 200),  # #FA7DC8
+                    (160, 255,  80),  # #A0FF50
                 ]
-                ALPHA = 140  # mask opacity 0-255
+                BOX_ALPHA  = 50  # fill transparency (0-255)
+                LINE_WIDTH = 3   # border thickness in pixels
 
                 for i, frame_file in enumerate(frame_files):
                     extracted_sec = i / fps
@@ -524,48 +598,150 @@ def extract_frames(project_name: str) -> Response:
 
                     frame_data = tracking_data.get(track_idx)
                     if not frame_data or not frame_data.get("masks"):
-                        continue  # no mask — keep original frame
+                        continue  # no objects in this frame — keep plain image
 
-                    img = Image.open(frame_file).convert("RGBA")
+                    img = Image.open(frame_file).convert("RGB")
                     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                    draw = ImageDraw.Draw(overlay)
+                    img_draw = ImageDraw.Draw(img)
 
                     for mask_entry in frame_data["masks"]:
                         obj_id = mask_entry.get("object_id", 0)
-                        rle = mask_entry.get("mask")
+                        rle    = mask_entry.get("mask", {})
                         if not rle:
                             continue
-                        try:
-                            decoded = rle_decode({"counts": rle["counts"], "size": rle["size"]})
-                            color = COLORS[obj_id % len(COLORS)]
-                            mask_rgba = np.zeros((*decoded.shape, 4), dtype=np.uint8)
-                            mask_rgba[decoded > 0] = [*color, ALPHA]
-                            mask_img = Image.fromarray(mask_rgba, "RGBA")
-                            overlay = Image.alpha_composite(overlay, mask_img)
-                        except Exception as me:
-                            logger.warning(f"Could not apply mask obj {obj_id}: {me}")
 
-                    composited = Image.alpha_composite(img, overlay).convert("RGB")
+                        bbox = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
+                        if not bbox or len(bbox) < 4:
+                            continue
+
+                        bx, by, bw, bh = bbox
+                        x0, y0 = int(bx), int(by)
+                        x1, y1 = int(bx + bw), int(by + bh)
+                        color  = COLORS[obj_id % len(COLORS)]
+                        label  = label_map.get(obj_id, f"object_{obj_id}")
+
+                        # Semi-transparent fill
+                        draw.rectangle([x0, y0, x1, y1], fill=(*color, BOX_ALPHA))
+
+                        # Solid border
+                        for t in range(LINE_WIDTH):
+                            img_draw.rectangle(
+                                [x0 + t, y0 + t, x1 - t, y1 - t],
+                                outline=color,
+                            )
+
+                        # Label chip (top-left corner of box)
+                        font_size = max(14, img.height // 30)
+                        try:
+                            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                        except Exception:
+                            font = ImageFont.load_default()
+
+                        tb = font.getbbox(label) if hasattr(font, 'getbbox') else (0, 0, len(label) * 8, font_size)
+                        tw = tb[2] - tb[0] + 8
+                        th = tb[3] - tb[1] + 6
+                        lx0 = x0
+                        ly0 = max(0, y0 - th)
+                        draw.rectangle([lx0, ly0, lx0 + tw, ly0 + th], fill=(*color, 220))
+                        draw.text((lx0 + 4, ly0 + 3), label, fill=(255, 255, 255, 255), font=font)
+
+                    # Composite semi-transparent fill + labels onto image
+                    composited = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
                     composited.save(str(frame_file), "JPEG", quality=92)
 
             except ImportError as ie:
-                logger.warning(f"PIL/numpy not available for mask overlay: {ie}. Saving plain frames.")
+                logger.warning(f"PIL not available for bbox draw: {ie}. Saving plain frames.")
 
-        # ── Write per-frame JSON ──────────────────────────────────────────────
+        # Build class index: object_id → class_id (0-based, ordered by objects_list)
+        class_id_map = {obj["object_id"]: idx for idx, obj in enumerate(objects_list)}
+
         for i, frame_file in enumerate(frame_files):
             extracted_sec = i / fps
             track_idx = int(round(extracted_sec * encode_fps))
             if tracking_data:
                 track_idx = min(track_idx, max(tracking_data.keys()))
 
-            frame_json = tracking_data.get(track_idx, {
-                "frame_index": track_idx,
-                "objects": objects_list,
-                "masks": [],
-                "note": "No mask data for this frame",
-            })
+            raw = tracking_data.get(track_idx)
+
+            # Get image dimensions
+            try:
+                from PIL import Image as _PILImg
+                with _PILImg.open(str(frame_file)) as _img:
+                    img_w, img_h = _img.size
+            except Exception:
+                img_w, img_h = 1280, 720
+
+            # Build LabelMe format JSON + YOLO txt simultaneously
+            shapes = []
+            yolo_lines = []
+
+            if raw and raw.get("masks"):
+                for mask_entry in raw["masks"]:
+                    obj_id = mask_entry.get("object_id", 0)
+                    rle    = mask_entry.get("mask", {})
+                    label  = label_map.get(obj_id, f"object_{obj_id}")
+                    bbox   = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
+                    points = bbox_to_points(bbox)
+
+                    if points:
+                        # LabelMe shape
+                        shapes.append({
+                            "label": label,
+                            "points": points,
+                            "group_id": None,
+                            "description": "",
+                            "shape_type": "rectangle",
+                            "flags": {},
+                        })
+
+                        # YOLO line: class_id x_center y_center width height (normalized)
+                        bx, by, bw, bh = bbox
+                        x_center = (bx + bw / 2.0) / img_w
+                        y_center = (by + bh / 2.0) / img_h
+                        w_norm   = bw / img_w
+                        h_norm   = bh / img_h
+                        class_id = class_id_map.get(obj_id, obj_id)
+                        yolo_lines.append(
+                            f"{class_id} {x_center:.6f} {y_center:.6f} {w_norm:.6f} {h_norm:.6f}"
+                        )
+
+            # Encode image as base64 for LabelMe imageData field
+            # (required by labelme2yolo which calls utils.img_b64_to_arr(imageData))
+            import base64
+            try:
+                with open(str(frame_file), "rb") as _imgf:
+                    image_data_b64 = base64.b64encode(_imgf.read()).decode("utf-8")
+            except Exception:
+                image_data_b64 = None
+
+            labelme_json = {
+                "version": "5.2.1",
+                "flags": {},
+                "shapes": shapes,
+                "imagePath": frame_file.name,
+                "imageData": image_data_b64,
+                "imageHeight": img_h,
+                "imageWidth": img_w,
+            }
+
             json_path = frames_dir / (frame_file.stem + ".json")
             with open(json_path, "w", encoding="utf-8") as jf:
-                json.dump(frame_json, jf, indent=2)
+                json.dump(labelme_json, jf, indent=2)
+
+            # Write YOLO .txt (empty file when no objects in frame)
+            txt_path = frames_dir / (frame_file.stem + ".txt")
+            with open(txt_path, "w", encoding="utf-8") as tf:
+                tf.write("\n".join(yolo_lines))
+
+        # Write classes.txt — YOLO class name list (index = class_id)
+        classes_path = frames_dir / "classes.txt"
+        class_names = [
+            label_map.get(obj["object_id"], f"object_{obj['object_id']}")
+            for obj in objects_list
+        ]
+        with open(classes_path, "w", encoding="utf-8") as cf:
+            cf.write("\n".join(class_names))
 
         return make_response({
             "success": True,
@@ -579,6 +755,252 @@ def extract_frames(project_name: str) -> Response:
     except Exception as e:
         logger.error(f"Error extracting frames for {project_name}: {e}")
         return make_response({"error": str(e)}, 500)
+
+
+@app.route("/labelme2yolo/<project_name>", methods=["POST"])
+def run_labelme2yolo(project_name: str) -> Response:
+    """
+    Split extracted frames into a YOLO dataset layout.
+
+    Body JSON: { "frames_dir": str, "val_size": float }
+      - frames_dir: subfolder name inside exports/<project_name>/
+      - val_size:   e.g. 0.2 → 20% val, 80% train
+
+    Creates inside <frames_dir>/YOLODataset/:
+      images/train/  images/val/   (.jpg)
+      labels/train/  labels/val/   (.txt YOLO)
+      classes.txt
+      dataset.yaml
+    """
+    import shutil, random, math
+
+    try:
+        body = request.get_json(force=True) or {}
+        frames_dir_name = body.get("frames_dir", "")
+        val_size = float(body.get("val_size", 0.2))
+        val_size = max(0.05, min(0.9, val_size))
+
+        if not frames_dir_name:
+            return make_response({"error": "frames_dir is required"}, 400)
+
+        project_folder = EXPORTS_PATH / project_name
+        if not project_folder.exists():
+            return make_response({"error": "Project not found"}, 404)
+
+        frames_dir = project_folder / frames_dir_name
+        if not frames_dir.exists():
+            return make_response({"error": f"frames_dir '{frames_dir_name}' not found"}, 404)
+
+        # Collect all jpg frames
+        jpg_files = sorted(frames_dir.glob("*.jpg"))
+        if not jpg_files:
+            return make_response({"error": "No .jpg frames found in frames_dir"}, 400)
+
+        # ── Train / val split ─────────────────────────────────────────────────
+        stems = [f.stem for f in jpg_files]
+        random.shuffle(stems)
+        # math.ceil guarantees at least 1 val frame even for small datasets
+        val_count   = max(1, math.ceil(len(stems) * val_size))
+        train_count = len(stems) - val_count
+        val_stems   = set(stems[:val_count])
+        train_stems = set(stems[val_count:])
+
+        # ── Create output folder ──────────────────────────────────────────────
+        yolo_dir = frames_dir / "YOLODataset"
+        if yolo_dir.exists():
+            shutil.rmtree(yolo_dir)
+
+        for split in ("train", "val"):
+            os.makedirs(yolo_dir / "images" / split, exist_ok=True)
+            os.makedirs(yolo_dir / "labels" / split, exist_ok=True)
+
+        # ── Copy images + labels ──────────────────────────────────────────────
+        for stem in stems:
+            split = "val" if stem in val_stems else "train"
+            # image
+            src_img = frames_dir / f"{stem}.jpg"
+            if src_img.exists():
+                shutil.copy2(str(src_img), str(yolo_dir / "images" / split / f"{stem}.jpg"))
+            # label
+            src_lbl = frames_dir / f"{stem}.txt"
+            if src_lbl.exists():
+                shutil.copy2(str(src_lbl), str(yolo_dir / "labels" / split / f"{stem}.txt"))
+            else:
+                # write empty label if no objects in frame
+                (yolo_dir / "labels" / split / f"{stem}.txt").write_text("")
+
+        # ── Copy classes.txt ──────────────────────────────────────────────────
+        src_classes = frames_dir / "classes.txt"
+        if src_classes.exists():
+            shutil.copy2(str(src_classes), str(yolo_dir / "classes.txt"))
+            class_names = src_classes.read_text(encoding="utf-8").strip().splitlines()
+        else:
+            class_names = []
+
+        # ── Write dataset.yaml ────────────────────────────────────────────────
+        yaml_path = yolo_dir / "dataset.yaml"
+        yaml_content = (
+            f"# YOLO dataset — generated by SAM2 Tracker\n"
+            f"# val: {int(val_size*100)}%  train: {100-int(val_size*100)}%\n"
+            f"# total: {len(stems)}  train: {train_count}  val: {val_count}\n"
+            f"\n"
+            f"path  : .\n"
+            f"train : images/train\n"
+            f"val   : images/val\n"
+            f"\n"
+            f"nc: {len(class_names)}\n"
+            f"names: {class_names}\n"
+        )
+        yaml_path.write_text(yaml_content, encoding="utf-8")
+
+        logger.info(
+            f"YOLO split done → {yolo_dir}: "
+            f"train={train_count} val={val_count}"
+        )
+
+        return make_response({
+            "success"     : True,
+            "yolo_dir"    : f"{frames_dir_name}/YOLODataset",
+            "train_count" : train_count,
+            "val_count"   : val_count,
+            "yaml_exists" : True,
+        }, 200)
+
+    except Exception as e:
+        logger.error(f"YOLO split error for {project_name}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/prepare_session", methods=["POST"])
+def prepare_session() -> Response:
+    """
+    Encode a selected range of a raw uploaded video and start a SAM2 session.
+    Called after user selects crop range on the frontend.
+
+    Body JSON:
+      raw_path:   relative path to raw uploaded file (e.g. "uploads/raw_<hash>.mp4")
+      start_sec:  start time in seconds (default 0)
+      end_sec:    end time in seconds (default = full video)
+
+    Returns: { "success": bool, "path": str, "session_id": str (placeholder) }
+    The actual SAM2 session is started by the existing start_session GraphQL mutation.
+    """
+    import json, shutil, subprocess
+
+    try:
+        # Parse JSON body — handle both content-type variants
+        try:
+            body = request.get_json(force=True, silent=True) or {}
+            if not body:
+                body = json.loads(request.data.decode('utf-8') or '{}')
+        except Exception:
+            body = {}
+
+        raw_path = body.get("raw_path", "")
+        start_sec = float(body.get("start_sec", 0))
+        end_sec = body.get("end_sec", None)
+
+        if not raw_path:
+            return make_response({"error": "raw_path is required"}, 400)
+
+        # Resolve absolute path
+        full_raw_path = os.path.join(str(DATA_PATH), raw_path.lstrip("/"))
+        if not os.path.isfile(full_raw_path):
+            # Try relative to UPLOADS_PATH
+            full_raw_path = str(UPLOADS_PATH / os.path.basename(raw_path))
+        if not os.path.isfile(full_raw_path):
+            return make_response({"error": f"Raw file not found: {raw_path}"}, 404)
+
+        # Duration to encode
+        duration_sec = (end_sec - start_sec) if end_sec is not None else None
+        if duration_sec is not None and duration_sec <= 0:
+            return make_response({"error": "end_sec must be greater than start_sec"}, 400)
+
+        # Cap to MAX_UPLOAD_VIDEO_DURATION
+        from app_conf import MAX_UPLOAD_VIDEO_DURATION
+        if duration_sec is None or duration_sec > MAX_UPLOAD_VIDEO_DURATION:
+            duration_sec = MAX_UPLOAD_VIDEO_DURATION
+
+        # Get encode settings from env (same as transcoder)
+        import ast
+        from app_conf import FFMPEG_NUM_THREADS
+        fps_max = int(os.environ.get("VIDEO_ENCODE_FPS", "10"))
+        max_frames = int(os.environ.get("VIDEO_ENCODE_MAX_FRAMES", "300"))
+        max_w = int(os.environ.get("VIDEO_ENCODE_MAX_WIDTH", "640"))
+        max_h = int(os.environ.get("VIDEO_ENCODE_MAX_HEIGHT", "360"))
+        crf = int(os.environ.get("VIDEO_ENCODE_CRF", "28"))
+        codec = os.environ.get("VIDEO_ENCODE_CODEC", "libx264")
+
+        # Calculate fps so total frames ≤ max_frames
+        actual_duration = duration_sec or 30.0
+        ideal_fps = max_frames / actual_duration
+        fps = max(4, min(fps_max, int(ideal_fps)))
+
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return make_response({"error": "ffmpeg not found"}, 500)
+
+        # Output path: same as uploads but without "raw_" prefix
+        raw_basename = os.path.basename(full_raw_path)
+        encoded_basename = raw_basename.replace("raw_", "", 1)
+        encoded_path = str(UPLOADS_PATH / encoded_basename)
+
+        # Encode selected range
+        cmd = [
+            ffmpeg, "-y",
+            "-threads", str(FFMPEG_NUM_THREADS),
+            "-ss", str(start_sec),
+            "-t", str(duration_sec),
+            "-i", full_raw_path,
+            "-threads", str(FFMPEG_NUM_THREADS),
+            "-vf", f"fps={fps},scale={max_w}:{max_h},setsar=1:1",
+            "-c:v", codec,
+            "-preset", "ultrafast",
+            "-crf", str(crf),
+            "-pix_fmt", "yuv420p",
+            "-threads", str(FFMPEG_NUM_THREADS),
+            encoded_path,
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            logger.error(f"prepare_session encode failed: {result.stderr}")
+            return make_response({"error": "Encoding failed", "details": result.stderr[-300:]}, 500)
+
+        # Return the encoded video path as "uploads/<filename>" 
+        # (relative to DATA_PATH, which is what startSession GraphQL mutation expects)
+        rel_path = f"{UPLOADS_PREFIX}/{encoded_basename}"
+
+        return make_response({
+            "success": True,
+            "path": rel_path,
+            "encoded_path": encoded_path,
+        }, 200)
+
+    except subprocess.TimeoutExpired:
+        return make_response({"error": "Encoding timed out"}, 500)
+    except Exception as e:
+        logger.error(f"prepare_session error: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/session_export_info/<session_id>", methods=["GET"])
+def session_export_info(session_id: str) -> Response:
+    """
+    Get the export project_name for an active session.
+    Returns: { "project_name": str } or 404 if not exported yet.
+    """
+    try:
+        session = inference_api._InferenceAPI__get_session(session_id)
+        export_folder = session.get("export_folder", "")
+        if not export_folder:
+            return make_response({"error": "Session not exported yet"}, 404)
+        project_name = os.path.basename(export_folder)
+        return make_response({"project_name": project_name}, 200)
+    except RuntimeError:
+        return make_response({"error": "Session not found"}, 404)
+    except Exception as e:
+        return make_response({"error": str(e)}, 500)
+
 
 @app.route("/frames_status/<project_name>", methods=["GET"])
 def frames_status(project_name: str) -> Response:
@@ -941,6 +1363,277 @@ class MyGraphQLView(GraphQLView):
         return {"inference_api": inference_api}
 
 
+@app.route("/list_yolo_datasets", methods=["GET"])
+def list_yolo_datasets() -> Response:
+    """Scan all export projects for YOLODataset folders."""
+    import json as _json
+    results = []
+    if not EXPORTS_PATH.exists():
+        return make_response({"datasets": []}, 200)
+
+    for project_dir in sorted(EXPORTS_PATH.iterdir()):
+        if not project_dir.is_dir() or project_dir.name.startswith("_"):
+            continue
+        project_name = project_dir.name
+
+        display_name = project_name[:24]
+        try:
+            with open(project_dir / "tracking.json", "r", encoding="utf-8") as f:
+                td = _json.load(f)
+                display_name = td.get("displayName") or td.get("video_name") or display_name
+        except Exception:
+            pass
+
+        for frames_dir in sorted(project_dir.iterdir()):
+            if not frames_dir.is_dir():
+                continue
+            yolo_dir = frames_dir / "YOLODataset"
+            if not yolo_dir.exists():
+                continue
+
+            classes_txt = yolo_dir / "classes.txt"
+            class_names: list = []
+            if classes_txt.exists():
+                class_names = [l.strip() for l in classes_txt.read_text().splitlines() if l.strip()]
+
+            train_imgs = list((yolo_dir / "images" / "train").glob("*.jpg")) if (yolo_dir / "images" / "train").exists() else []
+            val_imgs   = list((yolo_dir / "images" / "val").glob("*.jpg"))   if (yolo_dir / "images" / "val").exists()   else []
+
+            results.append({
+                "project"      : project_name,
+                "display_name" : display_name,
+                "frames_dir"   : frames_dir.name,
+                "yolo_dir"     : str(yolo_dir),
+                "dataset_yaml" : str(yolo_dir / "dataset.yaml"),
+                "class_names"  : class_names,
+                "train_count"  : len(train_imgs),
+                "val_count"    : len(val_imgs),
+                "has_yaml"     : (yolo_dir / "dataset.yaml").exists(),
+            })
+
+    return make_response({"datasets": results}, 200)
+
+
+@app.route("/merge_datasets", methods=["POST"])
+def merge_datasets() -> Response:
+    """
+    Merge selected YOLO datasets into _merged_training/ and return yaml path.
+    Body JSON: { "datasets": [yolo_dir_path, ...] }
+    Returns: { success, yaml_path, train_count, val_count, class_names }
+    """
+    import shutil
+
+    try:
+        body = request.get_json(force=True) or {}
+        dataset_paths = body.get("datasets", [])
+
+        if not dataset_paths:
+            return make_response({"error": "No datasets selected"}, 400)
+
+        # Normalize paths: if path points to dataset.yaml, use its parent dir
+        # If path points to a folder, look for dataset.yaml inside
+        # Also handle relative paths from browser webkitRelativePath (relative to EXPORTS_PATH)
+        normalized: list = []
+        for dp in dataset_paths:
+            p = Path(dp)
+            # If not absolute or doesn't exist, try prefixing with EXPORTS_PATH
+            if not p.is_absolute() or not p.exists():
+                p_abs = EXPORTS_PATH / dp
+                if p_abs.exists():
+                    p = p_abs
+                else:
+                    return make_response({"error": f"Path not found: {dp}"}, 404)
+            if p.is_file() and p.name in ("dataset.yaml", "dataset.yml"):
+                normalized.append(str(p.parent))   # use folder
+            elif p.is_dir():
+                yaml_check = p / "dataset.yaml"
+                if not yaml_check.exists():
+                    yaml_check = p / "dataset.yml"
+                if not yaml_check.exists():
+                    return make_response({"error": f"No dataset.yaml found in: {dp}"}, 400)
+                normalized.append(str(p))
+            else:
+                return make_response({"error": f"Invalid path: {dp}"}, 400)
+        dataset_paths = normalized
+
+        merged_dir = EXPORTS_PATH / "_merged_training"
+        if merged_dir.exists():
+            shutil.rmtree(merged_dir)
+        for split in ("train", "val"):
+            os.makedirs(merged_dir / "images" / split, exist_ok=True)
+            os.makedirs(merged_dir / "labels" / split, exist_ok=True)
+
+        all_class_names: list = []
+        copied = {"train": 0, "val": 0}
+
+        for dp in dataset_paths:
+            yolo_dir = Path(dp)
+            classes_txt = yolo_dir / "classes.txt"
+            if classes_txt.exists():
+                for cn in classes_txt.read_text().splitlines():
+                    cn = cn.strip()
+                    if cn and cn not in all_class_names:
+                        all_class_names.append(cn)
+
+            for split in ("train", "val"):
+                img_src = yolo_dir / "images" / split
+                lbl_src = yolo_dir / "labels" / split
+                if not img_src.exists():
+                    continue
+                for img_file in sorted(img_src.glob("*.jpg")):
+                    prefix = f"{yolo_dir.parent.parent.name[:8]}_{yolo_dir.parent.name[:12]}"
+                    stem   = f"{prefix}_{img_file.stem}"
+                    shutil.copy2(str(img_file), str(merged_dir / "images" / split / f"{stem}.jpg"))
+                    lbl_file = lbl_src / f"{img_file.stem}.txt"
+                    dst_lbl  = merged_dir / "labels" / split / f"{stem}.txt"
+                    if lbl_file.exists():
+                        shutil.copy2(str(lbl_file), str(dst_lbl))
+                    else:
+                        dst_lbl.write_text("")
+                    copied[split] += 1
+
+        yaml_path = merged_dir / "dataset.yaml"
+        yaml_path.write_text(
+            f"path  : {merged_dir}\n"
+            f"train : images/train\n"
+            f"val   : images/val\n"
+            f"\n"
+            f"nc: {len(all_class_names)}\n"
+            f"names: {all_class_names}\n",
+            encoding="utf-8",
+        )
+        logger.info(f"Merged: train={copied['train']} val={copied['val']} classes={all_class_names}")
+
+        return make_response({
+            "success"     : True,
+            "yaml_path"   : str(yaml_path),
+            "train_count" : copied["train"],
+            "val_count"   : copied["val"],
+            "class_names" : all_class_names,
+        }, 200)
+
+    except Exception as e:
+        logger.error(f"merge_datasets error: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+# ── Training job state (in-memory) ───────────────────────────────────────────
+import threading as _threading
+_train_jobs: dict = {}  # job_id → {status, log_lines, output_dir, error}
+
+
+@app.route("/train_yolo", methods=["POST"])
+def train_yolo() -> Response:
+    """
+    Start a yolo train job in background thread.
+    Body JSON: { "yaml_path": str, "imgsz": 640, "epochs": 10, "model": "yolov8n.pt" }
+    Returns: { job_id }  — use /train_status/<job_id> to poll progress
+    """
+    import shutil, subprocess, sys, uuid
+
+    try:
+        body = request.get_json(force=True) or {}
+        yaml_path = body.get("yaml_path", "")
+        imgsz  = int(body.get("imgsz", 640))
+        epochs = int(body.get("epochs", 10))
+        model  = body.get("model", "yolov8n.pt")
+
+        if not yaml_path:
+            return make_response({"error": "yaml_path is required"}, 400)
+        if not Path(yaml_path).exists():
+            return make_response({"error": f"yaml_path not found: {yaml_path}"}, 404)
+
+        # find yolo binary
+        yolo_bin = shutil.which("yolo")
+        if not yolo_bin:
+            venv_bin  = os.path.dirname(sys.executable)
+            candidate = os.path.join(venv_bin, "yolo")
+            if os.path.isfile(candidate):
+                yolo_bin = candidate
+        if not yolo_bin:
+            subprocess.run([sys.executable, "-m", "pip", "install", "ultralytics"],
+                           capture_output=True, timeout=180)
+            venv_bin = os.path.dirname(sys.executable)
+            yolo_bin = os.path.join(venv_bin, "yolo") or shutil.which("yolo")
+        if not yolo_bin or not os.path.isfile(yolo_bin):
+            return make_response({"error": "yolo not found. Run: pip install ultralytics"}, 500)
+
+        runs_dir   = EXPORTS_PATH / "_yolo_runs"
+        output_dir = str(runs_dir / "train")
+        job_id     = str(uuid.uuid4())[:8]
+        cmd = [
+            yolo_bin, "train",
+            f"data={yaml_path}",
+            f"imgsz={imgsz}",
+            f"epochs={epochs}",
+            f"model={model}",
+            f"project={runs_dir}",
+            "name=train",
+            "exist_ok=True",
+        ]
+
+        _train_jobs[job_id] = {
+            "status"    : "running",
+            "log_lines" : [f"$ {' '.join(cmd)}", ""],
+            "output_dir": output_dir,
+            "error"     : None,
+        }
+
+        def _run():
+            try:
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=str(EXPORTS_PATH),
+                )
+                for line in iter(proc.stdout.readline, ""):
+                    line = line.rstrip()
+                    _train_jobs[job_id]["log_lines"].append(line)
+                    # keep last 500 lines
+                    if len(_train_jobs[job_id]["log_lines"]) > 500:
+                        _train_jobs[job_id]["log_lines"] = _train_jobs[job_id]["log_lines"][-500:]
+                proc.wait()
+                if proc.returncode == 0:
+                    _train_jobs[job_id]["status"] = "success"
+                else:
+                    _train_jobs[job_id]["status"] = "error"
+                    _train_jobs[job_id]["error"]  = f"Process exited with code {proc.returncode}"
+            except Exception as ex:
+                _train_jobs[job_id]["status"] = "error"
+                _train_jobs[job_id]["error"]  = str(ex)
+
+        t = _threading.Thread(target=_run, daemon=True)
+        t.start()
+
+        return make_response({"success": True, "job_id": job_id, "output_dir": output_dir}, 200)
+
+    except Exception as e:
+        logger.error(f"train_yolo error: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/train_status/<job_id>", methods=["GET"])
+def train_status(job_id: str) -> Response:
+    """Poll training job status and log lines."""
+    job = _train_jobs.get(job_id)
+    if not job:
+        return make_response({"error": "Job not found"}, 404)
+
+    # find best.pt path
+    best_pt = ""
+    out = Path(job["output_dir"])
+    candidate = out / "weights" / "best.pt"
+    if candidate.exists():
+        best_pt = str(candidate)
+
+    return make_response({
+        "status"    : job["status"],
+        "log"       : "\n".join(job["log_lines"]),
+        "output_dir": job["output_dir"],
+        "best_pt"   : best_pt,
+        "error"     : job["error"],
+    }, 200)
+
+
 # Add GraphQL route to Flask app.
 app.add_url_rule(
     "/graphql",
@@ -961,3 +1654,4 @@ app.add_url_rule(
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7263, threaded=True)
+
