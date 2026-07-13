@@ -318,6 +318,9 @@ def list_exports() -> Response:
         for folder in EXPORTS_PATH.iterdir():
             if not folder.is_dir():
                 continue
+            # Skip internal folders (_merged_training, _yolo_runs, etc.)
+            if folder.name.startswith('_'):
+                continue
 
             export_info = {
                 "name": folder.name,
@@ -757,28 +760,25 @@ def extract_frames(project_name: str) -> Response:
 @app.route("/labelme2yolo/<project_name>", methods=["POST"])
 def run_labelme2yolo(project_name: str) -> Response:
     """
-    Convert LabelMe JSON frames to YOLO dataset format using labelme2yolo.
+    Split extracted frames into a YOLO dataset layout.
 
     Body JSON: { "frames_dir": str, "val_size": float }
       - frames_dir: subfolder name inside exports/<project_name>/
-                    e.g. "frames_5fps_original"
-      - val_size:   validation split ratio, e.g. 0.2 (= 20%)
+      - val_size:   e.g. 0.2 → 20% val, 80% train
 
-    Runs:
-      labelme2yolo --json_dir <abs_path_to_frames_dir> --val_size <val_size>
-
-    labelme2yolo creates its output inside <frames_dir>/YOLODataset/:
-      images/train/  images/val/
-      labels/train/  labels/val/
-      classes/       dataset.yaml
+    Creates inside <frames_dir>/YOLODataset/:
+      images/train/  images/val/   (.jpg)
+      labels/train/  labels/val/   (.txt YOLO)
+      classes.txt
+      dataset.yaml
     """
-    import shutil, subprocess, sys
+    import shutil, random, math
 
     try:
         body = request.get_json(force=True) or {}
         frames_dir_name = body.get("frames_dir", "")
         val_size = float(body.get("val_size", 0.2))
-        val_size = max(0.05, min(0.9, val_size))   # clamp to [0.05, 0.9]
+        val_size = max(0.05, min(0.9, val_size))
 
         if not frames_dir_name:
             return make_response({"error": "frames_dir is required"}, 400)
@@ -791,83 +791,83 @@ def run_labelme2yolo(project_name: str) -> Response:
         if not frames_dir.exists():
             return make_response({"error": f"frames_dir '{frames_dir_name}' not found"}, 404)
 
-        # Check that JSON files exist in this folder
-        json_files = list(frames_dir.glob("*.json"))
-        if not json_files:
-            return make_response({"error": "No LabelMe JSON files found in frames_dir"}, 400)
+        # Collect all jpg frames
+        jpg_files = sorted(frames_dir.glob("*.jpg"))
+        if not jpg_files:
+            return make_response({"error": "No .jpg frames found in frames_dir"}, 400)
 
-        # ── Find labelme2yolo ─────────────────────────────────────────────────
-        labelme2yolo_bin = shutil.which("labelme2yolo")
+        # ── Train / val split ─────────────────────────────────────────────────
+        stems = [f.stem for f in jpg_files]
+        random.shuffle(stems)
+        # math.ceil guarantees at least 1 val frame even for small datasets
+        val_count   = max(1, math.ceil(len(stems) * val_size))
+        train_count = len(stems) - val_count
+        val_stems   = set(stems[:val_count])
+        train_stems = set(stems[val_count:])
 
-        # If not on PATH, try same venv as the running Python
-        if not labelme2yolo_bin:
-            python_bin = sys.executable                        # e.g. /opt/sam2/venv/bin/python
-            venv_bin   = os.path.dirname(python_bin)           # e.g. /opt/sam2/venv/bin
-            candidate  = os.path.join(venv_bin, "labelme2yolo")
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                labelme2yolo_bin = candidate
+        # ── Create output folder ──────────────────────────────────────────────
+        yolo_dir = frames_dir / "YOLODataset"
+        if yolo_dir.exists():
+            shutil.rmtree(yolo_dir)
 
-        # Auto-install if still not found
-        if not labelme2yolo_bin:
-            logger.info("labelme2yolo not found — installing via pip...")
-            install = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "labelme2yolo"],
-                capture_output=True, text=True, timeout=120,
-            )
-            if install.returncode != 0:
-                return make_response({
-                    "error": "labelme2yolo not installed and auto-install failed",
-                    "details": install.stderr[-500:],
-                }, 500)
-            # Re-check after install
-            venv_bin = os.path.dirname(sys.executable)
-            candidate = os.path.join(venv_bin, "labelme2yolo")
-            labelme2yolo_bin = candidate if os.path.isfile(candidate) else shutil.which("labelme2yolo")
+        for split in ("train", "val"):
+            os.makedirs(yolo_dir / "images" / split, exist_ok=True)
+            os.makedirs(yolo_dir / "labels" / split, exist_ok=True)
 
-        if not labelme2yolo_bin:
-            return make_response({"error": "labelme2yolo binary not found after install"}, 500)
+        # ── Copy images + labels ──────────────────────────────────────────────
+        for stem in stems:
+            split = "val" if stem in val_stems else "train"
+            # image
+            src_img = frames_dir / f"{stem}.jpg"
+            if src_img.exists():
+                shutil.copy2(str(src_img), str(yolo_dir / "images" / split / f"{stem}.jpg"))
+            # label
+            src_lbl = frames_dir / f"{stem}.txt"
+            if src_lbl.exists():
+                shutil.copy2(str(src_lbl), str(yolo_dir / "labels" / split / f"{stem}.txt"))
+            else:
+                # write empty label if no objects in frame
+                (yolo_dir / "labels" / split / f"{stem}.txt").write_text("")
 
-        # ── Run labelme2yolo ──────────────────────────────────────────────────
-        cmd = [
-            labelme2yolo_bin,
-            "--json_dir", str(frames_dir),
-            "--val_size", str(round(val_size, 4)),
-        ]
-        logger.info(f"Running: {' '.join(cmd)}")
-        result = subprocess.run(
-            cmd,
-            capture_output=True, text=True, timeout=300,
-            cwd=str(frames_dir),
+        # ── Copy classes.txt ──────────────────────────────────────────────────
+        src_classes = frames_dir / "classes.txt"
+        if src_classes.exists():
+            shutil.copy2(str(src_classes), str(yolo_dir / "classes.txt"))
+            class_names = src_classes.read_text(encoding="utf-8").strip().splitlines()
+        else:
+            class_names = []
+
+        # ── Write dataset.yaml ────────────────────────────────────────────────
+        yaml_path = yolo_dir / "dataset.yaml"
+        yaml_content = (
+            f"# YOLO dataset — generated by SAM2 Tracker\n"
+            f"# val: {int(val_size*100)}%  train: {100-int(val_size*100)}%\n"
+            f"# total: {len(stems)}  train: {train_count}  val: {val_count}\n"
+            f"\n"
+            f"path  : .\n"
+            f"train : images/train\n"
+            f"val   : images/val\n"
+            f"\n"
+            f"nc: {len(class_names)}\n"
+            f"names: {class_names}\n"
+        )
+        yaml_path.write_text(yaml_content, encoding="utf-8")
+
+        logger.info(
+            f"YOLO split done → {yolo_dir}: "
+            f"train={train_count} val={val_count}"
         )
 
-        if result.returncode != 0:
-            logger.error(f"labelme2yolo failed: {result.stderr}")
-            return make_response({
-                "error": "labelme2yolo conversion failed",
-                "details": (result.stderr or result.stdout)[-800:],
-            }, 500)
-
-        logger.info(f"labelme2yolo done for {frames_dir_name}")
-
-        # ── Count output files ────────────────────────────────────────────────
-        yolo_dir = frames_dir / "YOLODataset"
-        train_images = list((yolo_dir / "images" / "train").glob("*.jpg")) if (yolo_dir / "images" / "train").exists() else []
-        val_images   = list((yolo_dir / "images" / "val").glob("*.jpg"))   if (yolo_dir / "images" / "val").exists()   else []
-        yaml_exists  = (yolo_dir / "dataset.yaml").exists()
-
         return make_response({
-            "success"      : True,
-            "yolo_dir"     : f"{frames_dir_name}/YOLODataset",
-            "train_count"  : len(train_images),
-            "val_count"    : len(val_images),
-            "yaml_exists"  : yaml_exists,
-            "stdout"       : result.stdout[-500:] if result.stdout else "",
+            "success"     : True,
+            "yolo_dir"    : f"{frames_dir_name}/YOLODataset",
+            "train_count" : train_count,
+            "val_count"   : val_count,
+            "yaml_exists" : True,
         }, 200)
 
-    except subprocess.TimeoutExpired:
-        return make_response({"error": "labelme2yolo timed out (>5 min)"}, 500)
     except Exception as e:
-        logger.error(f"labelme2yolo error for {project_name}: {e}")
+        logger.error(f"YOLO split error for {project_name}: {e}")
         return make_response({"error": str(e)}, 500)
 
 
@@ -1363,6 +1363,277 @@ class MyGraphQLView(GraphQLView):
         return {"inference_api": inference_api}
 
 
+@app.route("/list_yolo_datasets", methods=["GET"])
+def list_yolo_datasets() -> Response:
+    """Scan all export projects for YOLODataset folders."""
+    import json as _json
+    results = []
+    if not EXPORTS_PATH.exists():
+        return make_response({"datasets": []}, 200)
+
+    for project_dir in sorted(EXPORTS_PATH.iterdir()):
+        if not project_dir.is_dir() or project_dir.name.startswith("_"):
+            continue
+        project_name = project_dir.name
+
+        display_name = project_name[:24]
+        try:
+            with open(project_dir / "tracking.json", "r", encoding="utf-8") as f:
+                td = _json.load(f)
+                display_name = td.get("displayName") or td.get("video_name") or display_name
+        except Exception:
+            pass
+
+        for frames_dir in sorted(project_dir.iterdir()):
+            if not frames_dir.is_dir():
+                continue
+            yolo_dir = frames_dir / "YOLODataset"
+            if not yolo_dir.exists():
+                continue
+
+            classes_txt = yolo_dir / "classes.txt"
+            class_names: list = []
+            if classes_txt.exists():
+                class_names = [l.strip() for l in classes_txt.read_text().splitlines() if l.strip()]
+
+            train_imgs = list((yolo_dir / "images" / "train").glob("*.jpg")) if (yolo_dir / "images" / "train").exists() else []
+            val_imgs   = list((yolo_dir / "images" / "val").glob("*.jpg"))   if (yolo_dir / "images" / "val").exists()   else []
+
+            results.append({
+                "project"      : project_name,
+                "display_name" : display_name,
+                "frames_dir"   : frames_dir.name,
+                "yolo_dir"     : str(yolo_dir),
+                "dataset_yaml" : str(yolo_dir / "dataset.yaml"),
+                "class_names"  : class_names,
+                "train_count"  : len(train_imgs),
+                "val_count"    : len(val_imgs),
+                "has_yaml"     : (yolo_dir / "dataset.yaml").exists(),
+            })
+
+    return make_response({"datasets": results}, 200)
+
+
+@app.route("/merge_datasets", methods=["POST"])
+def merge_datasets() -> Response:
+    """
+    Merge selected YOLO datasets into _merged_training/ and return yaml path.
+    Body JSON: { "datasets": [yolo_dir_path, ...] }
+    Returns: { success, yaml_path, train_count, val_count, class_names }
+    """
+    import shutil
+
+    try:
+        body = request.get_json(force=True) or {}
+        dataset_paths = body.get("datasets", [])
+
+        if not dataset_paths:
+            return make_response({"error": "No datasets selected"}, 400)
+
+        # Normalize paths: if path points to dataset.yaml, use its parent dir
+        # If path points to a folder, look for dataset.yaml inside
+        # Also handle relative paths from browser webkitRelativePath (relative to EXPORTS_PATH)
+        normalized: list = []
+        for dp in dataset_paths:
+            p = Path(dp)
+            # If not absolute or doesn't exist, try prefixing with EXPORTS_PATH
+            if not p.is_absolute() or not p.exists():
+                p_abs = EXPORTS_PATH / dp
+                if p_abs.exists():
+                    p = p_abs
+                else:
+                    return make_response({"error": f"Path not found: {dp}"}, 404)
+            if p.is_file() and p.name in ("dataset.yaml", "dataset.yml"):
+                normalized.append(str(p.parent))   # use folder
+            elif p.is_dir():
+                yaml_check = p / "dataset.yaml"
+                if not yaml_check.exists():
+                    yaml_check = p / "dataset.yml"
+                if not yaml_check.exists():
+                    return make_response({"error": f"No dataset.yaml found in: {dp}"}, 400)
+                normalized.append(str(p))
+            else:
+                return make_response({"error": f"Invalid path: {dp}"}, 400)
+        dataset_paths = normalized
+
+        merged_dir = EXPORTS_PATH / "_merged_training"
+        if merged_dir.exists():
+            shutil.rmtree(merged_dir)
+        for split in ("train", "val"):
+            os.makedirs(merged_dir / "images" / split, exist_ok=True)
+            os.makedirs(merged_dir / "labels" / split, exist_ok=True)
+
+        all_class_names: list = []
+        copied = {"train": 0, "val": 0}
+
+        for dp in dataset_paths:
+            yolo_dir = Path(dp)
+            classes_txt = yolo_dir / "classes.txt"
+            if classes_txt.exists():
+                for cn in classes_txt.read_text().splitlines():
+                    cn = cn.strip()
+                    if cn and cn not in all_class_names:
+                        all_class_names.append(cn)
+
+            for split in ("train", "val"):
+                img_src = yolo_dir / "images" / split
+                lbl_src = yolo_dir / "labels" / split
+                if not img_src.exists():
+                    continue
+                for img_file in sorted(img_src.glob("*.jpg")):
+                    prefix = f"{yolo_dir.parent.parent.name[:8]}_{yolo_dir.parent.name[:12]}"
+                    stem   = f"{prefix}_{img_file.stem}"
+                    shutil.copy2(str(img_file), str(merged_dir / "images" / split / f"{stem}.jpg"))
+                    lbl_file = lbl_src / f"{img_file.stem}.txt"
+                    dst_lbl  = merged_dir / "labels" / split / f"{stem}.txt"
+                    if lbl_file.exists():
+                        shutil.copy2(str(lbl_file), str(dst_lbl))
+                    else:
+                        dst_lbl.write_text("")
+                    copied[split] += 1
+
+        yaml_path = merged_dir / "dataset.yaml"
+        yaml_path.write_text(
+            f"path  : {merged_dir}\n"
+            f"train : images/train\n"
+            f"val   : images/val\n"
+            f"\n"
+            f"nc: {len(all_class_names)}\n"
+            f"names: {all_class_names}\n",
+            encoding="utf-8",
+        )
+        logger.info(f"Merged: train={copied['train']} val={copied['val']} classes={all_class_names}")
+
+        return make_response({
+            "success"     : True,
+            "yaml_path"   : str(yaml_path),
+            "train_count" : copied["train"],
+            "val_count"   : copied["val"],
+            "class_names" : all_class_names,
+        }, 200)
+
+    except Exception as e:
+        logger.error(f"merge_datasets error: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+# ── Training job state (in-memory) ───────────────────────────────────────────
+import threading as _threading
+_train_jobs: dict = {}  # job_id → {status, log_lines, output_dir, error}
+
+
+@app.route("/train_yolo", methods=["POST"])
+def train_yolo() -> Response:
+    """
+    Start a yolo train job in background thread.
+    Body JSON: { "yaml_path": str, "imgsz": 640, "epochs": 10, "model": "yolov8n.pt" }
+    Returns: { job_id }  — use /train_status/<job_id> to poll progress
+    """
+    import shutil, subprocess, sys, uuid
+
+    try:
+        body = request.get_json(force=True) or {}
+        yaml_path = body.get("yaml_path", "")
+        imgsz  = int(body.get("imgsz", 640))
+        epochs = int(body.get("epochs", 10))
+        model  = body.get("model", "yolov8n.pt")
+
+        if not yaml_path:
+            return make_response({"error": "yaml_path is required"}, 400)
+        if not Path(yaml_path).exists():
+            return make_response({"error": f"yaml_path not found: {yaml_path}"}, 404)
+
+        # find yolo binary
+        yolo_bin = shutil.which("yolo")
+        if not yolo_bin:
+            venv_bin  = os.path.dirname(sys.executable)
+            candidate = os.path.join(venv_bin, "yolo")
+            if os.path.isfile(candidate):
+                yolo_bin = candidate
+        if not yolo_bin:
+            subprocess.run([sys.executable, "-m", "pip", "install", "ultralytics"],
+                           capture_output=True, timeout=180)
+            venv_bin = os.path.dirname(sys.executable)
+            yolo_bin = os.path.join(venv_bin, "yolo") or shutil.which("yolo")
+        if not yolo_bin or not os.path.isfile(yolo_bin):
+            return make_response({"error": "yolo not found. Run: pip install ultralytics"}, 500)
+
+        runs_dir   = EXPORTS_PATH / "_yolo_runs"
+        output_dir = str(runs_dir / "train")
+        job_id     = str(uuid.uuid4())[:8]
+        cmd = [
+            yolo_bin, "train",
+            f"data={yaml_path}",
+            f"imgsz={imgsz}",
+            f"epochs={epochs}",
+            f"model={model}",
+            f"project={runs_dir}",
+            "name=train",
+            "exist_ok=True",
+        ]
+
+        _train_jobs[job_id] = {
+            "status"    : "running",
+            "log_lines" : [f"$ {' '.join(cmd)}", ""],
+            "output_dir": output_dir,
+            "error"     : None,
+        }
+
+        def _run():
+            try:
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=str(EXPORTS_PATH),
+                )
+                for line in iter(proc.stdout.readline, ""):
+                    line = line.rstrip()
+                    _train_jobs[job_id]["log_lines"].append(line)
+                    # keep last 500 lines
+                    if len(_train_jobs[job_id]["log_lines"]) > 500:
+                        _train_jobs[job_id]["log_lines"] = _train_jobs[job_id]["log_lines"][-500:]
+                proc.wait()
+                if proc.returncode == 0:
+                    _train_jobs[job_id]["status"] = "success"
+                else:
+                    _train_jobs[job_id]["status"] = "error"
+                    _train_jobs[job_id]["error"]  = f"Process exited with code {proc.returncode}"
+            except Exception as ex:
+                _train_jobs[job_id]["status"] = "error"
+                _train_jobs[job_id]["error"]  = str(ex)
+
+        t = _threading.Thread(target=_run, daemon=True)
+        t.start()
+
+        return make_response({"success": True, "job_id": job_id, "output_dir": output_dir}, 200)
+
+    except Exception as e:
+        logger.error(f"train_yolo error: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/train_status/<job_id>", methods=["GET"])
+def train_status(job_id: str) -> Response:
+    """Poll training job status and log lines."""
+    job = _train_jobs.get(job_id)
+    if not job:
+        return make_response({"error": "Job not found"}, 404)
+
+    # find best.pt path
+    best_pt = ""
+    out = Path(job["output_dir"])
+    candidate = out / "weights" / "best.pt"
+    if candidate.exists():
+        best_pt = str(candidate)
+
+    return make_response({
+        "status"    : job["status"],
+        "log"       : "\n".join(job["log_lines"]),
+        "output_dir": job["output_dir"],
+        "best_pt"   : best_pt,
+        "error"     : job["error"],
+    }, 200)
+
+
 # Add GraphQL route to Flask app.
 app.add_url_rule(
     "/graphql",
@@ -1383,3 +1654,4 @@ app.add_url_rule(
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=7263, threaded=True)
+
