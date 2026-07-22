@@ -5,7 +5,7 @@
 <br/>
 
 <a href="https://github.com/facebookresearch/sam2">
-  <img src="https://img.shields.io/badge/%F0%9F%A4%96-Powered_by_SAM2-0064e0?style=flat-square" />
+  <img src="https://img.shields.io/badge/%F0%9F%A4%96-Powered_by_Meta_AI-0064e0?style=flat-square" />
 </a>
 <a href="https://github.com/ultralytics/ultralytics">
   <img src="https://img.shields.io/badge/%F0%9F%8E%AF-YOLOv8_Ultralytics-00b4d8?style=flat-square" />
@@ -110,7 +110,7 @@ quicklabel/
 │           ├── ProjectHubPage.tsx   ← home
 │           ├── DemoPage.tsx         ← video editor
 │           └── TrainPage.tsx        ← YOLO training
-├── sam2/                   ← AI model core
+├── sam2/                   ← AI model core (Meta)
 ├── checkpoints/            ← Model weights (auto-downloaded)
 ├── assets/
 │   ├── banner.png
@@ -217,7 +217,7 @@ If you use QuickLabel in your research or project, please cite:
 
 ## :clap: Acknowledgements
 
-- [Segment Anything Model 2 (SAM2)](https://github.com/facebookresearch/sam2) — Meta AI Research
+- [Segment Anything Model 2](https://github.com/facebookresearch/sam2) — Meta AI Research
 - [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
 
 ---
