@@ -1,161 +1,215 @@
 <div align="center">
 
-<img src="./assets/banner.png" width="100%" alt="SAM2 Tracker Banner"/>
+<img src="./assets/banner.png" width="100%" alt="SAM2 Tracker"/>
 
-<br/>
 <br/>
 
 <a href="https://github.com/facebookresearch/sam2">
-  <img src="https://img.shields.io/badge/Built_on-SAM2_Meta_AI-0064e0?style=flat-square&logo=meta" />
+  <img src="https://img.shields.io/badge/%F0%9F%A4%96-Built_on_SAM2_Meta_AI-0064e0?style=flat-square" />
 </a>
 <a href="https://github.com/ultralytics/ultralytics">
-  <img src="https://img.shields.io/badge/YOLO-v8_Ultralytics-00b4d8?style=flat-square" />
+  <img src="https://img.shields.io/badge/%F0%9F%8E%AF-YOLOv8_Ultralytics-00b4d8?style=flat-square" />
 </a>
-<img src="https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" />
-<img src="https://img.shields.io/badge/React-18-61dafb?style=flat-square&logo=react&logoColor=black" />
-<img src="https://img.shields.io/badge/Flask-Backend-000000?style=flat-square&logo=flask" />
-<img src="https://img.shields.io/badge/License-Apache_2.0-22c55e?style=flat-square" />
+<a href="#">
+  <img src="https://img.shields.io/badge/%F0%9F%90%8D-Python_3.11-3776AB?style=flat-square" />
+</a>
+<a href="#">
+  <img src="https://img.shields.io/badge/%E2%9A%9B%EF%B8%8F-React_18-61dafb?style=flat-square" />
+</a>
+<a href="./LICENSE">
+  <img src="https://img.shields.io/badge/%F0%9F%93%84-Apache_2.0-22c55e?style=flat-square" />
+</a>
 
 </div>
 
 <br/>
 
-**SAM2 Tracker** is a full-stack web application for interactive video object tracking, mask annotation, and YOLO model training — powered by Meta's [Segment Anything Model 2 (SAM2)](https://github.com/facebookresearch/sam2).
+> ***SAM2 Tracker*** is a full-stack web application for **interactive video object tracking**, mask annotation, and **YOLO model training** — powered by Meta's [Segment Anything Model 2](https://github.com/facebookresearch/sam2).
+> Click on any object in a video → SAM2 tracks it across every frame → export annotations → train a custom YOLOv8 detector. **No code required.**
 
-Click on any object in a video → SAM2 tracks it across every frame → export annotations → train a custom YOLOv8 model. No code required.
-
-- **One-click tracking** — click any object, SAM2 segments and tracks it instantly
-- **Multi-object support** — track up to 10 objects simultaneously with colored overlays
-- **Timeline crop** — drag handles to set start/end range; all tracking and export respect the crop
-- **Frame export** — extract frames at any FPS as `.jpg` + LabelMe `.json` + YOLO `.txt`
-- **YOLO training** — merge datasets, configure, and train YOLOv8 directly from the browser
-- **Project hub** — manage sessions, resume drafts, download exports
+***SAM2 Tracker*** is suitable for:
+- 🎯 **Surveillance & retail analytics** — track people, vehicles, or products across footage
+- 🏷️ **Data annotation** — generate LabelMe JSON + YOLO `.txt` labels automatically
+- 🤖 **Custom model training** — train YOLOv8 directly from the browser with your own data
+- 🎬 **Multi-object tracking** — up to 10 objects simultaneously with colored mask overlays
 
 ---
 
-## Demo
+## :movie_camera: Demo
 
 <div align="center">
 
-<img src="./assets/demo.gif" width="80%" alt="SAM2 Tracker Demo — Two tennis players tracked with colored mask overlays"/>
+<img src="./assets/demo.gif" width="80%" alt="SAM2 Tracker — Two tennis players tracked with orange and blue mask overlays"/>
 
-*Two players tracked simultaneously — orange and blue mask overlays propagated across 72 frames*
+*Two players tracked simultaneously — masks propagated across 72 frames at 10 fps*
 
 </div>
 
 ---
 
-## Architecture
+## :rocket: Features
 
-```
-┌─────────────────────────────────────────────┐
-│              Web Browser                    │
-│    React 18 + TypeScript + Relay GraphQL    │
-│                                             │
-│  ProjectHub → VideoEditor → TrainPage       │
-└──────────────────┬──────────────────────────┘
-                   │  HTTP / GraphQL
-┌──────────────────▼──────────────────────────┐
-│           Flask Backend (Python)            │
-│                                             │
-│  SAM2 Model → Tracking → Export → YOLO     │
-│  (PyTorch)    (GraphQL)  (JSON/MP4) (Ultralytics) │
-└─────────────────────────────────────────────┘
-```
+| Feature | Description |
+|---------|-------------|
+| ⚡ One-click tracking | Click any object — SAM2 segments and tracks it instantly |
+| 👥 Multi-object | Track up to 10 objects with distinct colored overlays |
+| ✂️ Timeline crop | Drag handles to define start/end; all tracking respects the range |
+| 📦 Frame export | Extract frames as `.jpg` + LabelMe `.json` + YOLO `.txt` at any FPS |
+| 🤖 YOLO training | Merge datasets, configure, and train YOLOv8 directly in the browser |
+| 💾 Draft saving | Sessions auto-saved — resume incomplete projects anytime |
+| 🎛️ Model selection | Switch between SAM2 Tiny / Small / Base+ / Large |
 
 ---
 
-## Quick Start
+## :computer: Get Started
 
-### macOS (Apple Silicon)
+### 🍎 macOS (Apple Silicon / Intel)
+
+**Prerequisites:** [Homebrew](https://brew.sh), Python 3.11, Node.js, ffmpeg, Yarn
 
 ```bash
-# 1. Clone
+# Step 1 — Install dependencies
+brew install python@3.11 node ffmpeg git
+npm install -g yarn
+
+# Step 2 — Clone the repo
 git clone git@gitlab.com:superuser.surveillance/sam2_labelme.git
 cd sam2_labelme
 git checkout mac
 
-# 2. Python setup
+# Step 3 — Python virtual environment
 python3.11 -m venv venv
 source venv/bin/activate
 pip install -e ".[demo]"
 
-# 3. Frontend setup
+# Step 4 — Frontend
 cd demo/frontend && yarn install && cd ../..
 
-# 4. Run
+# Step 5 — Run
 chmod +x run-demo.sh
 ./run-demo.sh
 ```
 
-Browser opens automatically → **http://localhost:7262**
+✅ Browser opens automatically → **http://localhost:7262**
+
+> **Note:** macOS uses Apple MPS (Metal GPU) automatically for faster inference. No NVIDIA GPU needed.
 
 ---
 
-### Ubuntu / Linux
+### 🐧 Ubuntu / Linux
+
+**Prerequisites:** Python 3.11, Node.js 20, ffmpeg, Yarn
 
 ```bash
-git checkout ubuntu
+# Step 1 — Install system dependencies
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3-pip ffmpeg git build-essential
 
-sudo apt-get install -y python3.11 python3.11-venv ffmpeg nodejs npm
+# Step 2 — Install Node.js 20 + Yarn
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
 npm install -g yarn
 
+# Step 3 — Clone the repo
+git clone git@gitlab.com:superuser.surveillance/sam2_labelme.git
+cd sam2_labelme
+git checkout ubuntu
+
+# Step 4 — Python virtual environment
 python3.11 -m venv venv
 source venv/bin/activate
 pip install -e ".[demo]"
+
+# Step 5 — Frontend
 cd demo/frontend && yarn install && cd ../..
 
+# Step 6 — Run
 chmod +x run-demo.sh
 ./run-demo.sh
 ```
 
+✅ Open browser → **http://localhost:7262**
+
+> **Note:** For GPU acceleration, ensure CUDA drivers are installed. The app runs on CPU if no GPU is detected.
+
 ---
 
-### Windows
+### 🪟 Windows
 
-```bash
+**Prerequisites:** Python 3.11, Node.js 18+, ffmpeg (in PATH), Git, Yarn
+
+```powershell
+# Step 1 — Install dependencies (PowerShell as Administrator)
+winget install Python.Python.3.11
+winget install OpenJS.NodeJS.LTS
+winget install Gyan.FFmpeg
+winget install Git.Git
+# Restart PowerShell after this step
+
+# Step 2 — Install Yarn
+npm install -g yarn
+
+# Step 3 — Clone the repo
+git clone git@gitlab.com:superuser.surveillance/sam2_labelme.git
+cd sam2_labelme
 git checkout windows
 
+# Step 4 — Python virtual environment
 python -m venv venv
 venv\Scripts\activate
 pip install -e ".[demo]"
-cd demo\frontend && yarn install && cd ..\..
 
-run-demo.bat
+# Step 5 — Frontend
+cd demo\frontend
+yarn install
+cd ..\..
+
+# Step 6 — Run
+powershell -ExecutionPolicy Bypass -File run-demo.ps1
 ```
+
+✅ Browser opens automatically → **http://localhost:7262**
+
+> **Note:** Add `ffmpeg` to your system PATH after installing. Restart terminal to apply.
 
 ---
 
-## How It Works
+## :world_map: How It Works
 
 ### Step 1 — Upload & Track
 
 1. Open **http://localhost:7262**
-2. Upload a video (up to 5 min, 250MB)
+2. Upload a video (up to 5 min, 250 MB — `.mp4` / `.mov`)
 3. Click **"+ Create New Project"**
-4. Click any object → SAM2 segments it instantly
-5. Press **"Track"** → mask propagates across all frames
+4. Set the crop range using the timeline handles *(optional)*
+5. Click any object in the video → SAM2 segments it instantly
+6. Press **"Track"** → mask propagates across all frames in the crop range
 
 ### Step 2 — Export Frames
 
-1. Open the completed project card
+1. Open the completed project card → click **"Extract Frames"**
 2. Select FPS (0.5 – 24)
-3. Click **"Extract Frames"** — saves:
+3. Each frame is saved as:
 
 ```
 frame_000001.jpg    ← image
-frame_000001.json   ← LabelMe rectangle format
+frame_000001.json   ← LabelMe rectangle annotation
 frame_000001.txt    ← YOLO format (normalized bbox)
 classes.txt         ← class names
 ```
 
-4. Click **"Convert to YOLO"** → generates:
+4. Click **"Convert to YOLO"** to generate a ready-to-train dataset:
 
 ```
 YOLODataset/
-  images/train/   images/val/
-  labels/train/   labels/val/
-  dataset.yaml
+├── images/
+│   ├── train/
+│   └── val/
+├── labels/
+│   ├── train/
+│   └── val/
+├── classes.txt
+└── dataset.yaml
 ```
 
 ### Step 3 — Train YOLO
@@ -163,91 +217,74 @@ YOLODataset/
 1. Click **"🎯 Train YOLO Model"** from the home page
 2. Select one or more `YOLODataset` folders
 3. Click **"Merge Datasets"**
-4. Configure `imgsz`, `epochs`, model size
+4. Configure: `imgsz` · `epochs` · model size (n / s / m / l / x)
 5. Click **"🚀 Start Training"** — live log streams to UI
-6. `best.pt` saved automatically
+6. `best.pt` saved inside the merged dataset folder
 
 ---
 
-## Models
+## :brain: Models
 
-SAM2 checkpoints live in `checkpoints/`:
+SAM2 checkpoints are stored in `checkpoints/`:
 
-| Model | Size | Speed | Accuracy |
-|-------|------|-------|----------|
-| `sam2.1_hiera_tiny.pt` | 38 MB | ⚡⚡⚡ | ★★☆ |
-| `sam2.1_hiera_small.pt` | 46 MB | ⚡⚡ | ★★★ |
-| `sam2.1_hiera_base_plus.pt` | 80 MB | ⚡ | ★★★★ |
-| `sam2.1_hiera_large.pt` | 224 MB | 🐢 | ★★★★★ |
+| Model | File | Size | Speed | Accuracy |
+|-------|------|------|-------|----------|
+| Tiny | `sam2.1_hiera_tiny.pt` | 38 MB | ⚡⚡⚡ | ★★☆ |
+| Small | `sam2.1_hiera_small.pt` | 46 MB | ⚡⚡ | ★★★ |
+| Base+ | `sam2.1_hiera_base_plus.pt` | 80 MB | ⚡ | ★★★★ |
+| Large | `sam2.1_hiera_large.pt` | 224 MB | 🐢 | ★★★★★ |
 
-Set active model with `MODEL_SIZE=tiny|small|base_plus|large` in `run-demo.sh`.
-
----
-
-## API Reference
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/extract_frames/<project>` | Extract frames from exported video |
-| `POST` | `/labelme2yolo/<project>` | Convert frames to YOLO dataset |
-| `GET`  | `/list_yolo_datasets` | List all YOLO datasets |
-| `POST` | `/merge_datasets` | Merge selected YOLO datasets |
-| `POST` | `/train_yolo` | Start YOLO training |
-| `GET`  | `/train_status/<job_id>` | Poll training progress |
-| `GET`  | `/list_exports` | List completed projects |
+Switch model by setting `MODEL_SIZE=tiny|small|base_plus|large` in `run-demo.sh`.
 
 ---
 
-## Environment Variables
+## :package: Architecture
+
+```
+┌──────────────────────────────────────────────────┐
+│                   Web Browser                    │
+│       React 18 + TypeScript + Relay (GraphQL)    │
+│                                                  │
+│   ProjectHub → VideoEditor → TrainPage           │
+└─────────────────────┬────────────────────────────┘
+                      │  HTTP / GraphQL
+┌─────────────────────▼────────────────────────────┐
+│             Flask Backend  (Python 3.11)         │
+│                                                  │
+│  SAM2 Model → Tracking → Export → YOLO Train    │
+│  (PyTorch)    (GraphQL)   (JSON/MP4) (Ultralytics)│
+└──────────────────────────────────────────────────┘
+```
+
+---
+
+## :wrench: Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_SIZE` | `tiny` | SAM2 model: `tiny` / `small` / `base_plus` / `large` |
+| `MODEL_SIZE` | `tiny` | SAM2 model size: `tiny` / `small` / `base_plus` / `large` |
 | `SAM2_MAX_FRAMES` | `300` | Max frames loaded into memory |
 | `VIDEO_ENCODE_FPS` | `10` | Transcoded video FPS |
 | `FFMPEG_NUM_THREADS` | `4` | ffmpeg CPU threads |
-| `MAX_UPLOAD_VIDEO_DURATION` | `300` | Max video length (seconds) |
+| `MAX_UPLOAD_VIDEO_DURATION` | `300` | Max video length in seconds |
 
 ---
 
-## File Structure
+## :sos: Troubleshooting
 
-```
-sam2_labelme/
-├── demo/
-│   ├── backend/server/
-│   │   ├── app.py              ← Flask API
-│   │   ├── inference/
-│   │   │   └── predictor.py    ← SAM2 inference wrapper
-│   │   └── data/               ← GraphQL schema, store, transcoder
-│   └── frontend/src/
-│       ├── routes/
-│       │   ├── ProjectHubPage.tsx    ← home page
-│       │   ├── DemoPage.tsx          ← video editor
-│       │   └── TrainPage.tsx         ← YOLO training
-│       └── common/components/
-├── sam2/                       ← SAM2 model code (Meta AI)
-├── assets/
-│   ├── banner.png              ← project banner
-│   └── demo.gif                ← demo animation
-├── checkpoints/                ← SAM2 model weights
-├── run-demo.sh                 ← startup script
-└── setup.py
-```
+| Problem | Fix |
+|---------|-----|
+| `python3.11: not found` | macOS: `brew install python@3.11` · Ubuntu: `sudo apt install python3.11` |
+| `ffmpeg: not found` | macOS: `brew install ffmpeg` · Ubuntu: `sudo apt install ffmpeg` · Windows: add to PATH after `winget install` |
+| `node: not found` | Restart terminal after Node.js install |
+| Port 7262 / 7263 in use | macOS/Ubuntu: `pkill -f "python.*app.py"` · Windows: restart PC |
+| Slow tracking | Normal on CPU — use a shorter crop range or switch to `tiny` model |
+| Session fails to start | Close other apps to free RAM (8 GB minimum required) |
+| SSH: `Permission denied` | Add your SSH public key to GitLab → Profile → SSH Keys |
 
 ---
 
-## Requirements
-
-- Python 3.11+
-- Node.js 18+ / Yarn
-- ffmpeg
-- 8 GB RAM minimum (16 GB recommended for Large model)
-- GPU optional — runs on CPU and Apple Silicon MPS
-
----
-
-## Acknowledgements
+## :clap: Acknowledgements
 
 Built on top of:
 
@@ -257,7 +294,7 @@ Built on top of:
 
 ---
 
-## License
+## :page_facing_up: License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.  
 SAM2 model weights are subject to Meta's [model license](https://github.com/facebookresearch/sam2/blob/main/LICENSE).
