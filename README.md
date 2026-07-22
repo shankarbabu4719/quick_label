@@ -1,11 +1,11 @@
 <div align="center">
 
-<img src="./assets/banner.png" width="100%" alt="SAM2 Tracker"/>
+<img src="./assets/banner.png" width="100%" alt="QuickLabel — powered by pinklotus.ai"/>
 
 <br/>
 
 <a href="https://github.com/facebookresearch/sam2">
-  <img src="https://img.shields.io/badge/%F0%9F%A4%96-Built_on_SAM2_Meta_AI-0064e0?style=flat-square" />
+  <img src="https://img.shields.io/badge/%F0%9F%A4%96-Powered_by_SAM2-0064e0?style=flat-square" />
 </a>
 <a href="https://github.com/ultralytics/ultralytics">
   <img src="https://img.shields.io/badge/%F0%9F%8E%AF-YOLOv8_Ultralytics-00b4d8?style=flat-square" />
@@ -25,8 +25,8 @@
 
 <br/>
 
-> ***SAM2 Tracker*** is a full-stack web application for **interactive video object tracking**, mask annotation, and **YOLO model training** — powered by Meta's [Segment Anything Model 2](https://github.com/facebookresearch/sam2).
-> Click on any object in a video → SAM2 tracks it across every frame → export annotations → train a custom YOLOv8 detector. **No code required.**
+> ***QuickLabel*** is a full-stack web application for **interactive video object tracking**, mask annotation, and **YOLO model training** — no code required.
+> Upload a video → click any object → tracks across every frame → export annotations → train a custom detector.
 
 ---
 
@@ -34,7 +34,7 @@
 
 <div align="center">
 
-<img src="./assets/demo.gif" width="80%" alt="SAM2 Tracker Demo"/>
+<img src="./assets/demo.gif" width="80%" alt="QuickLabel Demo"/>
 
 *Two players tracked simultaneously — masks propagated across 72 frames at 10 fps*
 
@@ -52,7 +52,7 @@ main
 └── 🪟  windows  ──→  git checkout windows
 ```
 
-> This branch is configured for **Ubuntu / Linux**. It runs on CPU by default; CUDA GPU is automatically used if NVIDIA drivers are installed.
+> This branch is configured for **Ubuntu / Linux**. Runs on CPU by default; CUDA GPU is used automatically if NVIDIA drivers are installed.
 
 ---
 
@@ -64,11 +64,9 @@ main
 |------|---------|
 | Python | 3.11+ |
 | Node.js | 20+ |
-| ffmpeg | any recent |
+| ffmpeg | any |
 | Git | any |
 | Yarn | latest |
-
----
 
 ### Step 1 — System dependencies
 
@@ -116,7 +114,7 @@ chmod +x run-demo.sh
 
 ✅ Open browser → **http://localhost:7262**
 
-> **CUDA GPU:** If NVIDIA GPU + CUDA drivers are installed, PyTorch uses CUDA automatically. Check with `python3 -c "import torch; print(torch.cuda.is_available())"`.
+> **CUDA GPU:** PyTorch uses CUDA automatically if NVIDIA drivers are installed. Verify: `python3 -c "import torch; print(torch.cuda.is_available())"`
 
 ---
 
@@ -124,13 +122,13 @@ chmod +x run-demo.sh
 
 | Feature | Description |
 |---------|-------------|
-| ⚡ One-click tracking | Click any object — SAM2 segments and tracks it instantly |
+| ⚡ One-click tracking | Click any object — segments and tracks instantly |
 | 👥 Multi-object | Track up to 10 objects with colored overlays |
 | ✂️ Timeline crop | Drag handles to set start/end range |
-| 📦 Frame export | `.jpg` + LabelMe `.json` + YOLO `.txt` at any FPS |
-| 🤖 YOLO training | Merge datasets and train YOLOv8 in the browser |
+| 📦 Frame export | `.jpg` + YOLO `.txt` at any FPS |
+| 🤖 YOLO training | Merge datasets and train directly in the browser |
 | 💾 Draft saving | Auto-saved sessions — resume anytime |
-| 🎛️ Model selection | SAM2 Tiny / Small / Base+ / Large |
+| 🎛️ Model selection | Tiny / Small / Base+ / Large |
 
 ---
 
@@ -139,20 +137,20 @@ chmod +x run-demo.sh
 ### Step 1 — Upload & Track
 
 1. Open **http://localhost:7262**
-2. Upload a video (up to 5 min, 250 MB — `.mp4` / `.mov`)
+2. Upload a video (up to 5 min, 250 MB)
 3. Click **"+ Create New Project"**
 4. Set crop range using timeline handles *(optional)*
-5. Click any object → SAM2 segments instantly
+5. Click any object → segments instantly
 6. Press **"Track"** → propagates across all frames
 
 ### Step 2 — Export Frames
 
 1. Open completed project → **"Extract Frames"**
-2. Select FPS (0.5 – 24) → saved as:
+2. Select FPS (0.5 – 24):
 
 ```
 frame_000001.jpg    ← image
-frame_000001.json   ← LabelMe annotation
+frame_000001.json   ← annotation
 frame_000001.txt    ← YOLO bbox
 classes.txt
 ```
@@ -166,7 +164,7 @@ YOLODataset/
 └── dataset.yaml
 ```
 
-### Step 3 — Train YOLO
+### Step 3 — Train
 
 1. Click **"🎯 Train YOLO Model"**
 2. Select datasets → **"Merge"** → configure → **"🚀 Start Training"**
@@ -178,12 +176,12 @@ YOLODataset/
 
 | Model | Size | Speed | Accuracy |
 |-------|------|-------|----------|
-| `sam2.1_hiera_tiny.pt` | 38 MB | ⚡⚡⚡ | ★★☆ |
-| `sam2.1_hiera_small.pt` | 46 MB | ⚡⚡ | ★★★ |
-| `sam2.1_hiera_base_plus.pt` | 80 MB | ⚡ | ★★★★ |
-| `sam2.1_hiera_large.pt` | 224 MB | 🐢 | ★★★★★ |
+| Tiny | 38 MB | ⚡⚡⚡ | ★★☆ |
+| Small | 46 MB | ⚡⚡ | ★★★ |
+| Base+ | 80 MB | ⚡ | ★★★★ |
+| Large | 224 MB | 🐢 | ★★★★★ |
 
-Set model in `run-demo.sh`: `MODEL_SIZE=tiny|small|base_plus|large`
+Set model: `MODEL_SIZE=tiny|small|base_plus|large` in `run-demo.sh`
 
 ---
 
@@ -193,11 +191,11 @@ Set model in `run-demo.sh`: `MODEL_SIZE=tiny|small|base_plus|large`
 |---------|-----|
 | `python3.11: not found` | `sudo apt install python3.11 python3.11-venv` |
 | `ffmpeg: not found` | `sudo apt install ffmpeg` |
-| `node: not found` | Re-run NodeSource setup script and restart terminal |
+| `node: not found` | Re-run NodeSource setup, restart terminal |
 | Port 7262/7263 in use | `pkill -f "python.*app.py"` |
-| Slow tracking | Switch to `tiny` model or shorten crop range |
+| Slow tracking | Switch to Tiny model or shorten crop range |
 | Session fails | Close other apps — 8 GB RAM minimum |
-| CUDA not detected | Install NVIDIA drivers: `sudo apt install nvidia-cuda-toolkit` |
+| CUDA not detected | `sudo apt install nvidia-cuda-toolkit` |
 
 ---
 
@@ -205,11 +203,9 @@ Set model in `run-demo.sh`: `MODEL_SIZE=tiny|small|base_plus|large`
 
 - [Segment Anything Model 2 (SAM2)](https://github.com/facebookresearch/sam2) — Meta AI Research
 - [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
-- [LabelMe](https://github.com/labelmeai/labelme) annotation format
 
 ---
 
 ## :page_facing_up: License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
-SAM2 model weights subject to Meta's [model license](https://github.com/facebookresearch/sam2/blob/main/LICENSE).
