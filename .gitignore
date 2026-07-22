@@ -6,10 +6,16 @@ __pycache__/
 venv/
 .venv/
 
-# Videos
+# Videos (exclude from tracking, but allow assets folder)
 *.mp4
 *.avi
 *.mov
+
+# Always track assets folder (banner, demo GIF)
+!assets/
+!assets/*.png
+!assets/*.gif
+!assets/*.jpg
 
 # Output folders
 demo/data/exports/
@@ -32,8 +38,3 @@ _C.*
 outputs/*
 checkpoints/*.pt
 demo/backend/checkpoints/*.pt
-
-# Runtime logs
-backend.log
-backend_err.log
-frontend.log
