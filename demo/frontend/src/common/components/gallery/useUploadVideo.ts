@@ -52,6 +52,7 @@ export default function useUploadVideo({
           path
           posterPath
           posterUrl
+          durationSec
         }
       }
     `,

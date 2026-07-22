@@ -114,12 +114,24 @@ export default function ProjectHubPage() {
   const [modelSelected, setModelSelected] = useState(false);
   const [pendingDraft, setPendingDraft] = useState<DraftProject | null>(null);
   const [extractModal, setExtractModal] = useState<{projectName: string; displayName: string; hasMasked: boolean} | null>(null);
+  const [projectDetail, setProjectDetail] = useState<ExportProject | null>(null);
+  const [cropModal, setCropModal] = useState<{video: any} | null>(null);
   const navigate = useNavigate();
   const setUploadingState = useSetAtom(uploadingStateAtom);
   const setSession        = useSetAtom(sessionAtom);
 
   const {getRootProps, getInputProps, isUploading, error} = useUploadVideo({
-    onUpload: v => { navigate('/demo', {state: {video: v}}); setUploadingState('default'); setSession(null); },
+    onUpload: v => {
+      setUploadingState('default');
+      setSession(null);
+      // If video has duration (raw upload), show crop selection first
+      if (v.durationSec && v.durationSec > 0) {
+        setCropModal({video: v});
+      } else {
+        // Fallback: old flow (already encoded)
+        navigate('/demo', {state: {video: v}});
+      }
+    },
     onUploadError: e => { setUploadingState('error'); Logger.error(e); },
     onUploadStart: () => setUploadingState('uploading'),
   });
@@ -167,21 +179,6 @@ export default function ProjectHubPage() {
   const fetchDrafts = useCallback(async () => {
     try { const r = await fetch('http://localhost:7263/list_drafts'); const d = await r.json(); setDrafts(d.drafts || []); } catch(e) { Logger.error(e); }
   }, []);
-
-  function handleDownloadJSON(name: string) {
-    const a = document.createElement('a');
-    a.href = `http://localhost:7263/exports/${name}/tracking.json`;
-    a.download = 'tracking.json';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  }
-
-  function handleOpenExtractModal(p: ExportProject) {
-    setExtractModal({
-      projectName: p.name,
-      displayName: p.displayName || p.name.slice(0, 16) + '...',
-      hasMasked: p.hasMasked,
-    });
-  }
 
   async function handleResumeDraft(draft: DraftProject) {
     // Model must be selected first
@@ -291,6 +288,7 @@ export default function ProjectHubPage() {
               {icon:'✂️', label:'Timeline crop'},
               {icon:'📦', label:'JSON + Video export'},
               {icon:'🖼', label:'Frame extraction'},
+              {icon:'🎯', label:'YOLO training'},
             ].map(f => (
               <div key={f.label} style={{
                 display:'flex', alignItems:'center', gap:7,
@@ -301,6 +299,32 @@ export default function ProjectHubPage() {
                 <span>{f.icon}</span> {f.label}
               </div>
             ))}
+          </div>
+
+          {/* Train YOLO Model button */}
+          <div style={{display:'flex', justifyContent:'center', marginBottom:8}}>
+            <button
+              onClick={() => navigate('/train')}
+              style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'12px 28px',
+                background:'linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.15))',
+                border:'1px solid rgba(99,102,241,0.35)',
+                borderRadius:12, cursor:'pointer',
+                color:'#a5b4fc', fontSize:14, fontWeight:700,
+                boxShadow:'0 2px 12px rgba(99,102,241,0.2)',
+                transition:'all 0.18s',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background='linear-gradient(135deg,rgba(99,102,241,0.25),rgba(139,92,246,0.25))';
+                e.currentTarget.style.boxShadow='0 4px 20px rgba(99,102,241,0.35)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background='linear-gradient(135deg,rgba(99,102,241,0.15),rgba(139,92,246,0.15))';
+                e.currentTarget.style.boxShadow='0 2px 12px rgba(99,102,241,0.2)';
+              }}>
+              🎯 Train YOLO Model
+            </button>
           </div>
 
         {/* Model Selection — before upload */}
@@ -426,10 +450,8 @@ export default function ProjectHubPage() {
                 thumb={p.thumbnailUrl ? `http://localhost:7263/${p.thumbnailUrl}` : null}
                 name={p.displayName || (p.name.slice(0, 16) + '...')}
                 badge="Complete" badgeColor={C.green}
-                actions={[
-                  ...(p.hasJson ? [{label:'Download JSON', icon:'↓', color:C.indigo, onClick:() => handleDownloadJSON(p.name)}] : []),
-                  {label:'Extract Frames', icon:'🖼', color:C.amber, onClick:() => handleOpenExtractModal(p)},
-                ]}
+                onClick={() => setProjectDetail(p)}
+                actions={[]}
               />
             ))}
           </CardGrid>
@@ -473,13 +495,33 @@ export default function ProjectHubPage() {
         )}
       </div>
 
-      {/* ── Extract Frames Modal ── */}
+      {/* ── Project Detail Modal ── */}
+      {projectDetail && (
+        <ProjectDetailModal
+          project={projectDetail}
+          onClose={() => setProjectDetail(null)}
+        />
+      )}
+
+      {/* ── Extract Frames Modal (legacy, kept for ProjectHub card button) ── */}
       {extractModal && (
         <ExtractFramesModal
           projectName={extractModal.projectName}
           displayName={extractModal.displayName}
           hasMasked={extractModal.hasMasked}
           onClose={() => setExtractModal(null)}
+        />
+      )}
+
+      {/* ── Crop & Start Modal ── */}
+      {cropModal && (
+        <CropAndStartModal
+          video={cropModal.video}
+          onClose={() => setCropModal(null)}
+          onStart={(encodedVideo) => {
+            setCropModal(null);
+            navigate('/demo', {state: {video: encodedVideo}});
+          }}
         />
       )}
     </div>
@@ -550,15 +592,16 @@ type CardAction = {
   onClick: (e: React.MouseEvent) => void;
 };
 
-function Card({thumb, name, badge, badgeColor, meta, actions=[]}: {
+function Card({thumb, name, badge, badgeColor, meta, actions=[], onClick}: {
   thumb: string|null; name: string; badge: string; badgeColor: string;
-  meta?: string; actions?: CardAction[];
+  meta?: string; actions?: CardAction[]; onClick?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
       style={{
         background: hovered ? C.surfaceHi : C.surface,
         border:`1px solid ${hovered ? C.borderHi : C.border}`,
@@ -566,7 +609,7 @@ function Card({thumb, name, badge, badgeColor, meta, actions=[]}: {
         transition:'all 0.18s',
         transform: hovered ? 'translateY(-3px)' : 'none',
         boxShadow: hovered ? '0 12px 32px rgba(0,0,0,0.5)' : 'none',
-        cursor:'default',
+        cursor: onClick ? 'pointer' : 'default',
       }}>
       {/* Thumbnail */}
       <div style={{width:'100%', aspectRatio:'16/9', background:C.surfaceHi, position:'relative', overflow:'hidden'}}>
@@ -623,6 +666,273 @@ function Card({thumb, name, badge, badgeColor, meta, actions=[]}: {
 
 // ── Sub-components ─────────────────────────────────────────────────
 
+// ── Project Detail Modal ──────────────────────────────────────────
+function ProjectDetailModal({project, onClose}: {
+  project: ExportProject;
+  onClose: () => void;
+}) {
+  const displayName = project.displayName || project.name.slice(0, 20) + '...';
+
+  // extract + yolo state
+  const [fps, setFps]           = useState('5');
+  const [extractStatus, setExtractStatus] = useState<'idle'|'loading'|'success'|'error'>('idle');
+  const [extractResult, setExtractResult] = useState<{frameCount:number; framesDir:string}|null>(null);
+  const [extractError, setExtractError]   = useState('');
+  const [valPct, setValPct]     = useState(20);
+  const [yoloStatus, setYoloStatus] = useState<'idle'|'loading'|'success'|'error'>('idle');
+  const [yoloResult, setYoloResult] = useState<{trainCount:number;valCount:number;yoloDir:string}|null>(null);
+  const [yoloError, setYoloError]   = useState('');
+
+  const FPS_OPTIONS = ['0.5','1','2','5','10','24'];
+
+  function downloadJSON() {
+    const a = document.createElement('a');
+    a.href = `http://localhost:7263/exports/${project.name}/tracking.json`;
+    a.download = 'tracking.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  function downloadMasked() {
+    const a = document.createElement('a');
+    a.href = `http://localhost:7263/exports/${project.name}/masked.mp4`;
+    a.download = 'masked.mp4';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  async function handleExtract() {
+    setExtractStatus('loading'); setExtractError('');
+    try {
+      const r = await fetch(`http://localhost:7263/extract_frames/${project.name}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({fps: parseFloat(fps), source:'original'}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) { setExtractError(d.error||'Failed'); setExtractStatus('error'); return; }
+      setExtractResult({frameCount: d.frame_count, framesDir: d.frames_dir});
+      setExtractStatus('success');
+    } catch { setExtractError('Network error'); setExtractStatus('error'); }
+  }
+
+  async function handleYolo() {
+    if (!extractResult) return;
+    setYoloStatus('loading'); setYoloError('');
+    try {
+      const r = await fetch(`http://localhost:7263/labelme2yolo/${project.name}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({frames_dir: extractResult.framesDir, val_size: valPct/100}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) { setYoloError(d.error||'Failed'); setYoloStatus('error'); return; }
+      setYoloResult({trainCount:d.train_count, valCount:d.val_count, yoloDir:d.yolo_dir});
+      setYoloStatus('success');
+    } catch { setYoloError('Network error'); setYoloStatus('error'); }
+  }
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, zIndex:999,
+      background:'rgba(0,0,0,0.8)', backdropFilter:'blur(6px)',
+      display:'flex', alignItems:'center', justifyContent:'center', padding:24,
+      overflowY:'auto',
+    }} onClick={e => { if (e.target===e.currentTarget) onClose(); }}>
+      <div style={{
+        background:'#13151C', border:'1px solid rgba(255,255,255,0.1)',
+        borderRadius:20, padding:'28px 32px',
+        width:'100%', maxWidth:500,
+        boxShadow:'0 24px 64px rgba(0,0,0,0.7)',
+        animation:'fadeUp 0.2s ease',
+        maxHeight:'90vh', overflowY:'auto',
+      }}>
+        <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}} @keyframes spin{to{transform:rotate(360deg)}}`}</style>
+
+        {/* Header */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24}}>
+          <div>
+            <div style={{fontSize:18, fontWeight:700, color:'#F0F2F7'}}>{displayName}</div>
+            <div style={{
+              display:'inline-flex', alignItems:'center', gap:5, marginTop:4,
+              background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.3)',
+              borderRadius:6, padding:'2px 8px', fontSize:11, fontWeight:700, color:'#22C55E',
+            }}>✓ Complete</div>
+          </div>
+          <button onClick={onClose} style={{
+            background:'rgba(255,255,255,0.06)', border:'none',
+            width:32, height:32, borderRadius:8,
+            color:'rgba(255,255,255,0.5)', fontSize:16, cursor:'pointer',
+          }}>✕</button>
+        </div>
+
+        {/* ── Downloads ── */}
+        <div style={{marginBottom:20}}>
+          <SectionLabel>Downloads</SectionLabel>
+          <div style={{display:'flex', gap:10}}>
+            {project.hasJson && (
+              <ActionBtn icon="↓" label="Download JSON" color="#6366f1" onClick={downloadJSON} />
+            )}
+            {project.hasMasked && (
+              <ActionBtn icon="🎭" label="Masked Video" color="#22C55E" onClick={downloadMasked} />
+            )}
+          </div>
+        </div>
+
+        {/* ── Extract Frames ── */}
+        <div style={{
+          padding:'16px', borderRadius:12,
+          background:'rgba(255,255,255,0.03)',
+          border:'1px solid rgba(255,255,255,0.07)',
+          marginBottom: extractStatus==='success' ? 16 : 0,
+        }}>
+          <SectionLabel>Extract Frames</SectionLabel>
+
+          {/* FPS */}
+          <div style={{display:'flex', alignItems:'center', gap:7, marginBottom:12, flexWrap:'wrap'}}>
+            <span style={{fontSize:11, color:'rgba(255,255,255,0.4)', fontWeight:600, textTransform:'uppercase'}}>FPS:</span>
+            {FPS_OPTIONS.map(f => (
+              <button key={f} onClick={() => setFps(f)} style={{
+                padding:'4px 10px', fontSize:12, fontWeight:600, borderRadius:6, cursor:'pointer',
+                border:`1px solid ${fps===f?'#6366f1':'rgba(255,255,255,0.12)'}`,
+                background: fps===f?'rgba(99,102,241,0.2)':'rgba(255,255,255,0.04)',
+                color: fps===f?'#818cf8':'rgba(255,255,255,0.45)',
+              }}>{f}</button>
+            ))}
+          </div>
+
+          {extractStatus==='error' && (
+            <div style={{marginBottom:10,padding:'8px 10px',borderRadius:8,
+              background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',
+              fontSize:12,color:'#fca5a5'}}>⚠️ {extractError}</div>
+          )}
+
+          <button onClick={handleExtract} disabled={extractStatus==='loading'} style={{
+            width:'100%', padding:'10px 0',
+            background: extractStatus==='loading'?'rgba(99,102,241,0.4)':'#6366f1',
+            border:'none', borderRadius:10, color:'#fff',
+            fontSize:13, fontWeight:700,
+            cursor: extractStatus==='loading'?'not-allowed':'pointer',
+            display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+          }}>
+            {extractStatus==='loading' ? (
+              <><span style={{width:13,height:13,borderRadius:'50%',border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',animation:'spin 0.7s linear infinite',display:'inline-block'}}/> Extracting...</>
+            ) : extractStatus==='success' ? (
+              <>🖼 Re-extract Frames @ {fps} FPS</>
+            ) : (
+              <>🖼 Extract Frames @ {fps} FPS</>
+            )}
+          </button>
+
+          {extractStatus==='success' && extractResult && (
+            <div style={{marginTop:10,padding:'8px 12px',borderRadius:8,
+              background:'rgba(34,197,94,0.08)',border:'1px solid rgba(34,197,94,0.2)',
+              fontSize:12,color:'#86efac'}}>
+              ✅ <strong>{extractResult.frameCount}</strong> frames → <code style={{fontSize:10}}>{extractResult.framesDir}/</code>
+            </div>
+          )}
+        </div>
+
+        {/* ── Convert to YOLO ── (shown after extract) */}
+        {extractStatus==='success' && (
+          <div style={{
+            padding:'16px', borderRadius:12,
+            background:'rgba(99,102,241,0.06)',
+            border:'1px solid rgba(99,102,241,0.18)',
+          }}>
+            <SectionLabel>Convert to YOLO Dataset</SectionLabel>
+
+            {yoloStatus !== 'success' ? (
+              <>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                  <span style={{fontSize:12,color:'rgba(255,255,255,0.4)'}}>Validation size</span>
+                  <span style={{fontSize:13,fontWeight:700,color:'#a5b4fc',
+                    background:'rgba(99,102,241,0.15)',padding:'2px 10px',borderRadius:5}}>
+                    val {valPct}% · train {100-valPct}%
+                  </span>
+                </div>
+                <div style={{display:'flex',gap:5,marginBottom:8}}>
+                  {[10,15,20,25,30].map(v => (
+                    <button key={v} onClick={()=>setValPct(v)} style={{
+                      flex:1,padding:'6px 0',fontSize:12,fontWeight:600,
+                      borderRadius:6,cursor:'pointer',border:'none',
+                      background:valPct===v?'#6366f1':'rgba(255,255,255,0.07)',
+                      color:valPct===v?'#fff':'rgba(255,255,255,0.4)',
+                    }}>{v}%</button>
+                  ))}
+                </div>
+                <input type="range" min={5} max={50} step={5} value={valPct}
+                  onChange={e=>setValPct(Number(e.target.value))}
+                  style={{width:'100%',accentColor:'#6366f1',marginBottom:10,cursor:'pointer'}}/>
+
+                {yoloStatus==='error' && (
+                  <div style={{marginBottom:10,padding:'8px 10px',borderRadius:8,
+                    background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',
+                    fontSize:12,color:'#fca5a5'}}>⚠️ {yoloError}</div>
+                )}
+
+                <button onClick={handleYolo} disabled={yoloStatus==='loading'} style={{
+                  width:'100%',padding:'10px 0',
+                  background:yoloStatus==='loading'?'rgba(99,102,241,0.4)':'#6366f1',
+                  border:'none',borderRadius:10,color:'#fff',
+                  fontSize:13,fontWeight:700,
+                  cursor:yoloStatus==='loading'?'not-allowed':'pointer',
+                  display:'flex',alignItems:'center',justifyContent:'center',gap:8,
+                }}>
+                  {yoloStatus==='loading'?(
+                    <><span style={{width:13,height:13,borderRadius:'50%',border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',animation:'spin 0.7s linear infinite',display:'inline-block'}}/> Converting...</>
+                  ):<>🗂 Convert to YOLO (val {valPct}%)</>}
+                </button>
+              </>
+            ) : (
+              <div style={{textAlign:'center',padding:'8px 0'}}>
+                <div style={{fontSize:20,marginBottom:8}}>🎉</div>
+                <div style={{fontSize:14,fontWeight:700,color:'#a5b4fc',marginBottom:10}}>YOLO Dataset Ready!</div>
+                <div style={{display:'flex',justifyContent:'center',gap:24,marginBottom:10}}>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:20,fontWeight:800,color:'#6366f1'}}>{yoloResult?.trainCount}</div>
+                    <div style={{fontSize:10,color:'rgba(255,255,255,0.4)'}}>train</div>
+                  </div>
+                  <div style={{color:'rgba(255,255,255,0.2)',alignSelf:'center'}}>·</div>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:20,fontWeight:800,color:'#818cf8'}}>{yoloResult?.valCount}</div>
+                    <div style={{fontSize:10,color:'rgba(255,255,255,0.4)'}}>val</div>
+                  </div>
+                </div>
+                <div style={{fontFamily:'monospace',fontSize:10,color:'rgba(255,255,255,0.35)',
+                  padding:'8px',background:'rgba(0,0,0,0.3)',borderRadius:6,lineHeight:1.8}}>
+                  📁 {yoloResult?.yoloDir}/<br/>
+                  &nbsp;&nbsp;images/train/ &nbsp;images/val/<br/>
+                  &nbsp;&nbsp;labels/train/ &nbsp;labels/val/<br/>
+                  &nbsp;&nbsp;dataset.yaml
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionLabel({children}: {children: React.ReactNode}) {
+  return (
+    <div style={{
+      fontSize:10,fontWeight:700,color:'rgba(255,255,255,0.3)',
+      letterSpacing:'0.08em',textTransform:'uppercase',marginBottom:10,
+    }}>{children}</div>
+  );
+}
+
+function ActionBtn({icon,label,color,onClick}: {icon:string;label:string;color:string;onClick:()=>void}) {
+  return (
+    <button onClick={onClick} style={{
+      flex:1,padding:'10px 14px',borderRadius:10,cursor:'pointer',
+      background:`${color}18`,border:`1px solid ${color}44`,
+      color:color,fontSize:12,fontWeight:700,
+      display:'flex',alignItems:'center',justifyContent:'center',gap:6,
+    }}>
+      <span>{icon}</span>{label}
+    </button>
+  );
+}
+
 // ── Extract Frames Modal ───────────────────────────────────────────
 function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
   projectName: string;
@@ -635,6 +945,12 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [result, setResult] = useState<{frameCount: number; framesDir: string; alreadyExists: boolean} | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // YOLO convert state (shown after extract success)
+  const [yoloStatus, setYoloStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [yoloResult, setYoloResult] = useState<{trainCount: number; valCount: number; yoloDir: string} | null>(null);
+  const [yoloError, setYoloError] = useState('');
+  const [valPct, setValPct] = useState(20);
 
   const FPS_OPTIONS = [
     {value: '0.5', label: '0.5 fps — 1 frame every 2s'},
@@ -665,6 +981,30 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
     } catch (e) {
       setErrorMsg('Network error — is the backend running?');
       setStatus('error');
+    }
+  }
+
+  async function handleYoloConvert() {
+    if (!result) return;
+    setYoloStatus('loading');
+    setYoloError('');
+    try {
+      const r = await fetch(`http://localhost:7263/labelme2yolo/${projectName}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({frames_dir: result.framesDir, val_size: valPct / 100}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setYoloError(d.error || 'Conversion failed');
+        setYoloStatus('error');
+        return;
+      }
+      setYoloResult({trainCount: d.train_count, valCount: d.val_count, yoloDir: d.yolo_dir});
+      setYoloStatus('success');
+    } catch (e) {
+      setYoloError('Network error — is the backend running?');
+      setYoloStatus('error');
     }
   }
 
@@ -790,31 +1130,123 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
             </button>
           </>
         ) : (
-          /* Success state */
-          <div style={{textAlign:'center', padding:'8px 0'}}>
-            <div style={{fontSize:48, marginBottom:16}}>✅</div>
-            <div style={{fontSize:18, fontWeight:700, color:'#F0F2F7', marginBottom:8}}>
-              {result?.alreadyExists ? 'Already extracted!' : 'Frames extracted!'}
-            </div>
-            <div style={{fontSize:13, color:'rgba(240,242,247,0.5)', marginBottom:24, lineHeight:1.6}}>
-              <strong style={{color:'#a5b4fc'}}>{result?.frameCount}</strong> frames saved to<br/>
-              <code style={{
-                fontSize:11, background:'rgba(255,255,255,0.06)',
-                padding:'3px 8px', borderRadius:6, color:'rgba(240,242,247,0.7)',
-              }}>
-                exports/{projectName}/{result?.framesDir}/
-              </code>
-            </div>
+          /* ── Success: frames extracted ── */
+          <div style={{padding:'4px 0'}}>
+            {/* Extracted info */}
             <div style={{
-              padding:'10px 14px', borderRadius:10,
+              display:'flex', alignItems:'center', gap:12, marginBottom:20,
+              padding:'12px 16px', borderRadius:12,
               background:'rgba(34,197,94,0.08)', border:'1px solid rgba(34,197,94,0.2)',
-              fontSize:12, color:'#86efac', marginBottom:20, lineHeight:1.5,
             }}>
-              📁 Frames are saved locally on the server.<br/>
-              Find them in the <strong>demo/data/exports/</strong> folder.
+              <span style={{fontSize:28}}>✅</span>
+              <div>
+                <div style={{fontSize:14, fontWeight:700, color:'#F0F2F7'}}>
+                  {result?.alreadyExists ? 'Already extracted!' : 'Frames extracted!'}
+                </div>
+                <div style={{fontSize:12, color:'rgba(240,242,247,0.5)', marginTop:2}}>
+                  <strong style={{color:'#86efac'}}>{result?.frameCount}</strong> frames →{' '}
+                  <code style={{fontSize:11, color:'rgba(240,242,247,0.55)'}}>
+                    exports/{projectName}/{result?.framesDir}/
+                  </code>
+                </div>
+              </div>
             </div>
+
+            {/* ── YOLO Convert section ── */}
+            {yoloStatus !== 'success' ? (
+              <div style={{
+                padding:'18px', marginBottom:20,
+                background:'rgba(99,102,241,0.06)',
+                border:'1px solid rgba(99,102,241,0.18)',
+                borderRadius:14,
+              }}>
+                <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:14}}>
+                  <span style={{fontSize:18}}>🗂</span>
+                  <div>
+                    <div style={{fontSize:14, fontWeight:700, color:'#a5b4fc'}}>Convert to YOLO Dataset</div>
+                    <div style={{fontSize:11, color:'rgba(240,242,247,0.35)', marginTop:1}}>
+                      Uses <code style={{fontSize:10}}>labelme2yolo</code> · images/ · labels/ · dataset.yaml
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10}}>
+                  <span style={{fontSize:12, fontWeight:600, color:'rgba(240,242,247,0.5)'}}>Validation size</span>
+                  <span style={{fontSize:13, fontWeight:700, color:'#a5b4fc', background:'rgba(99,102,241,0.15)', padding:'2px 10px', borderRadius:6}}>
+                    val {valPct}% &nbsp;·&nbsp; train {100 - valPct}%
+                  </span>
+                </div>
+
+                <div style={{display:'flex', gap:6, marginBottom:10}}>
+                  {[10, 15, 20, 25, 30].map(v => (
+                    <button key={v} onClick={() => setValPct(v)} style={{
+                      flex:1, padding:'6px 0', fontSize:12, fontWeight:600,
+                      borderRadius:7, cursor:'pointer', border:'none',
+                      background: valPct === v ? '#6366f1' : 'rgba(255,255,255,0.07)',
+                      color: valPct === v ? '#fff' : 'rgba(240,242,247,0.5)',
+                      transition:'all 0.15s',
+                    }}>{v}%</button>
+                  ))}
+                </div>
+
+                <input type="range" min={5} max={50} step={5} value={valPct}
+                  onChange={e => setValPct(Number(e.target.value))}
+                  style={{width:'100%', accentColor:'#6366f1', cursor:'pointer', marginBottom:4}} />
+                <div style={{display:'flex', justifyContent:'space-between', fontSize:10, color:'rgba(240,242,247,0.25)', marginBottom:14}}>
+                  <span>5% val</span><span>50% val</span>
+                </div>
+
+                {yoloStatus === 'error' && (
+                  <div style={{marginBottom:12, padding:'8px 12px', borderRadius:8, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', fontSize:12, color:'#fca5a5'}}>
+                    ⚠️ {yoloError}
+                  </div>
+                )}
+
+                <button onClick={handleYoloConvert} disabled={yoloStatus === 'loading'} style={{
+                  width:'100%', padding:'11px 0',
+                  background: yoloStatus === 'loading' ? 'rgba(99,102,241,0.4)' : '#6366f1',
+                  border:'none', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700,
+                  cursor: yoloStatus === 'loading' ? 'not-allowed' : 'pointer',
+                  boxShadow:'0 3px 12px rgba(99,102,241,0.3)',
+                  display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+                }}>
+                  {yoloStatus === 'loading' ? (
+                    <>
+                      <span style={{width:13, height:13, borderRadius:'50%', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'#fff', animation:'spin 0.7s linear infinite', display:'inline-block'}} />
+                      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                      Converting with labelme2yolo...
+                    </>
+                  ) : <>🗂 Convert to YOLO (val {valPct}%)</>}
+                </button>
+              </div>
+            ) : (
+              <div style={{padding:'16px 18px', marginBottom:20, background:'rgba(99,102,241,0.08)', border:'1px solid rgba(99,102,241,0.25)', borderRadius:14}}>
+                <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:12}}>
+                  <span style={{fontSize:20}}>🎉</span>
+                  <div style={{fontSize:14, fontWeight:700, color:'#a5b4fc'}}>YOLO Dataset Ready!</div>
+                </div>
+                <div style={{display:'flex', justifyContent:'center', gap:28, marginBottom:12}}>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:22, fontWeight:800, color:'#6366f1'}}>{yoloResult?.trainCount}</div>
+                    <div style={{fontSize:11, color:'rgba(240,242,247,0.4)'}}>train</div>
+                  </div>
+                  <div style={{color:'rgba(240,242,247,0.15)', fontSize:22, alignSelf:'center'}}>·</div>
+                  <div style={{textAlign:'center'}}>
+                    <div style={{fontSize:22, fontWeight:800, color:'#818cf8'}}>{yoloResult?.valCount}</div>
+                    <div style={{fontSize:11, color:'rgba(240,242,247,0.4)'}}>val</div>
+                  </div>
+                </div>
+                <div style={{fontFamily:'monospace', fontSize:11, color:'rgba(240,242,247,0.4)', lineHeight:1.8, padding:'8px 10px', background:'rgba(0,0,0,0.25)', borderRadius:8}}>
+                  <div style={{color:'#818cf8', fontWeight:700, marginBottom:2}}>📁 {yoloResult?.yoloDir}/</div>
+                  <div>&nbsp;&nbsp;├─ images/train/ &nbsp;&nbsp;images/val/</div>
+                  <div>&nbsp;&nbsp;├─ labels/train/ &nbsp;&nbsp;labels/val/</div>
+                  <div>&nbsp;&nbsp;└─ dataset.yaml</div>
+                </div>
+              </div>
+            )}
+
             <div style={{display:'flex', gap:10}}>
-              <button onClick={() => { setStatus('idle'); setResult(null); }} style={{
+              <button onClick={() => { setStatus('idle'); setResult(null); setYoloStatus('idle'); setYoloResult(null); }} style={{
                 flex:1, padding:'10px 0', borderRadius:10,
                 background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)',
                 color:'rgba(240,242,247,0.7)', fontSize:13, fontWeight:600, cursor:'pointer',
@@ -832,3 +1264,270 @@ function ExtractFramesModal({projectName, displayName, hasMasked, onClose}: {
   );
 }
 
+
+// ── Crop & Start Modal ──────────────────────────────────────────────
+function CropAndStartModal({video, onClose, onStart}: {
+  video: any;
+  onClose: () => void;
+  onStart: (encodedVideo: any) => void;
+}) {
+  const totalSec = video.durationSec ?? 60;
+  const [startSec, setStartSec] = useState(0);
+  const [endSec, setEndSec]     = useState(Math.min(totalSec, 30));
+  const [status, setStatus]     = useState<'idle'|'encoding'|'error'>('idle');
+  const [errorMsg, setErrorMsg] = useState('');
+  const videoRef  = useRef<HTMLVideoElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const dragging  = useRef<'start'|'end'|null>(null);
+
+  const HANDLE_W = 14;
+
+  function formatTime(s: number) {
+    const m = Math.floor(s / 60);
+    const sec = (s % 60).toFixed(1);
+    return m > 0 ? `${m}:${sec.padStart(4,'0')}` : `${Number(sec).toFixed(1)}s`;
+  }
+
+  const durSec   = endSec - startSec;
+  const startFrac = startSec / totalSec;
+  const endFrac   = endSec   / totalSec;
+
+  // Sync video to current position when handle released
+  function seekVideo(sec: number) {
+    if (videoRef.current) {
+      videoRef.current.currentTime = sec;
+    }
+  }
+
+  // Timeline pointer drag
+  useEffect(() => {
+    function getFrac(e: PointerEvent) {
+      const rect = timelineRef.current?.getBoundingClientRect();
+      if (!rect) return 0;
+      return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    }
+    function onMove(e: PointerEvent) {
+      if (!dragging.current) return;
+      const f = getFrac(e);
+      const sec = f * totalSec;
+      if (dragging.current === 'start') {
+        const s = Math.min(sec, endSec - 0.5);
+        setStartSec(Math.max(0, s));
+        if (videoRef.current) videoRef.current.currentTime = Math.max(0, s);
+      } else {
+        const s = Math.max(sec, startSec + 0.5);
+        setEndSec(Math.min(totalSec, s));
+        if (videoRef.current) videoRef.current.currentTime = Math.min(totalSec, s);
+      }
+    }
+    function onUp() { dragging.current = null; }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+  }, [startSec, endSec, totalSec]);
+
+  async function handleStart() {
+    setStatus('encoding');
+    setErrorMsg('');
+    try {
+      const r = await fetch('http://localhost:7263/prepare_session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({raw_path: video.path, start_sec: startSec, end_sec: endSec}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) { setErrorMsg(d.error || 'Encoding failed'); setStatus('error'); return; }
+      onStart({...video, path: d.path, url: `http://localhost:7263/${d.path}`, durationSec: durSec});
+    } catch {
+      setErrorMsg('Network error — is the backend running?');
+      setStatus('error');
+    }
+  }
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, zIndex:999,
+      background:'rgba(0,0,0,0.88)', backdropFilter:'blur(8px)',
+      display:'flex', alignItems:'center', justifyContent:'center', padding:24,
+    }} onClick={e => { if (e.target===e.currentTarget) onClose(); }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{
+        background:'#13151C', border:'1px solid rgba(255,255,255,0.1)',
+        borderRadius:20, padding:'28px 32px',
+        width:'100%', maxWidth:600,
+        boxShadow:'0 24px 64px rgba(0,0,0,0.7)',
+        display:'flex', flexDirection:'column', gap:20,
+      }}>
+
+        {/* Header */}
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+          <div>
+            <div style={{fontSize:17, fontWeight:700, color:'#F0F2F7'}}>✂️ Select clip range</div>
+            <div style={{fontSize:12, color:'rgba(240,242,247,0.35)', marginTop:2}}>
+              Drag handles on the timeline · Only selected clip gets encoded
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:'rgba(255,255,255,0.06)',border:'none',width:32,height:32,borderRadius:8,color:'rgba(255,255,255,0.5)',fontSize:16,cursor:'pointer'}}>✕</button>
+        </div>
+
+        {/* Video preview */}
+        <div style={{borderRadius:12, overflow:'hidden', background:'#000', aspectRatio:'16/9', position:'relative'}}>
+          <video
+            ref={videoRef}
+            src={`http://localhost:7263/${video.path}`}
+            style={{width:'100%', height:'100%', objectFit:'contain'}}
+            muted preload="auto"
+          />
+          {/* Play/pause overlay */}
+          <div
+            onClick={() => videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause()}
+            style={{
+              position:'absolute', bottom:10, left:'50%', transform:'translateX(-50%)',
+              background:'rgba(0,0,0,0.55)', borderRadius:20, padding:'5px 16px',
+              fontSize:12, color:'rgba(255,255,255,0.8)', cursor:'pointer',
+              userSelect:'none',
+            }}>
+            ▶ / ⏸ click to play/pause
+          </div>
+        </div>
+
+        {/* Timeline with drag handles */}
+        <div>
+          {/* Time labels */}
+          <div style={{display:'flex', justifyContent:'space-between', fontSize:10, color:'rgba(255,255,255,0.3)', marginBottom:6}}>
+            <span>0:00</span>
+            <span style={{color:'#a5b4fc', fontWeight:700}}>
+              {formatTime(startSec)} → {formatTime(endSec)} &nbsp;·&nbsp; {formatTime(durSec)} selected
+            </span>
+            <span>{formatTime(totalSec)}</span>
+          </div>
+
+          {/* Timeline bar */}
+          <div
+            ref={timelineRef}
+            style={{
+              position:'relative', height:48, borderRadius:8,
+              background:'rgba(255,255,255,0.06)',
+              userSelect:'none',
+            }}
+            onClick={e => {
+              // Click to seek preview
+              const rect = timelineRef.current?.getBoundingClientRect();
+              if (!rect) return;
+              const f = (e.clientX - rect.left) / rect.width;
+              if (videoRef.current) videoRef.current.currentTime = f * totalSec;
+            }}
+          >
+            {/* Dim left */}
+            <div style={{position:'absolute', top:0, bottom:0, left:0, width:`${startFrac*100}%`, background:'rgba(0,0,0,0.5)', pointerEvents:'none'}} />
+            {/* Dim right */}
+            <div style={{position:'absolute', top:0, bottom:0, right:0, width:`${(1-endFrac)*100}%`, background:'rgba(0,0,0,0.5)', pointerEvents:'none'}} />
+            {/* Selection fill */}
+            <div style={{
+              position:'absolute', top:0, bottom:0,
+              left:`${startFrac*100}%`, width:`${(endFrac-startFrac)*100}%`,
+              background:'rgba(99,102,241,0.2)',
+              borderTop:'2px solid #6366f1', borderBottom:'2px solid #6366f1',
+              pointerEvents:'none',
+            }} />
+
+            {/* Duration badge */}
+            <div style={{
+              position:'absolute', top:'50%', transform:'translateY(-50%)',
+              left:`${startFrac*100}%`, width:`${(endFrac-startFrac)*100}%`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              pointerEvents:'none',
+            }}>
+              <span style={{fontSize:11,fontWeight:700,color:'#a5b4fc',background:'rgba(13,15,22,0.85)',padding:'2px 8px',borderRadius:6}}>
+                {formatTime(durSec)}
+              </span>
+            </div>
+
+            {/* ── Left handle ── */}
+            <div
+              onPointerDown={e => { e.stopPropagation(); dragging.current = 'start'; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
+              onClick={e => e.stopPropagation()}
+              style={{
+                position:'absolute', top:0, bottom:0,
+                left:`calc(${startFrac*100}% - ${HANDLE_W/2}px)`,
+                width:HANDLE_W,
+                background:'#6366f1', borderRadius:'4px 0 0 4px',
+                cursor:'ew-resize', zIndex:10,
+                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+              }}>
+              {[0,1,2].map(i => <div key={i} style={{width:2,height:8,borderRadius:1,background:'rgba(255,255,255,0.6)'}} />)}
+              <div style={{
+                position:'absolute', bottom:'110%', left:'50%', transform:'translateX(-50%)',
+                background:'#1e1f26', color:'#818cf8', fontSize:10, fontWeight:700,
+                padding:'2px 6px', borderRadius:4, whiteSpace:'nowrap',
+                border:'1px solid rgba(99,102,241,0.4)',
+              }}>{formatTime(startSec)}</div>
+            </div>
+
+            {/* ── Right handle ── */}
+            <div
+              onPointerDown={e => { e.stopPropagation(); dragging.current = 'end'; (e.target as HTMLElement).setPointerCapture(e.pointerId); }}
+              onClick={e => e.stopPropagation()}
+              style={{
+                position:'absolute', top:0, bottom:0,
+                left:`calc(${endFrac*100}% - ${HANDLE_W/2}px)`,
+                width:HANDLE_W,
+                background:'#6366f1', borderRadius:'0 4px 4px 0',
+                cursor:'ew-resize', zIndex:10,
+                display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:3,
+              }}>
+              {[0,1,2].map(i => <div key={i} style={{width:2,height:8,borderRadius:1,background:'rgba(255,255,255,0.6)'}} />)}
+              <div style={{
+                position:'absolute', bottom:'110%', left:'50%', transform:'translateX(-50%)',
+                background:'#1e1f26', color:'#818cf8', fontSize:10, fontWeight:700,
+                padding:'2px 6px', borderRadius:4, whiteSpace:'nowrap',
+                border:'1px solid rgba(99,102,241,0.4)',
+              }}>{formatTime(endSec)}</div>
+            </div>
+          </div>
+
+          {/* Seek buttons */}
+          <div style={{display:'flex', gap:8, marginTop:10}}>
+            <button onClick={() => seekVideo(startSec)} style={{
+              flex:1, padding:'7px 0', fontSize:12, fontWeight:600,
+              background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.25)',
+              borderRadius:8, color:'#a5b4fc', cursor:'pointer',
+            }}>⏮ Preview start</button>
+            <button onClick={() => seekVideo(endSec)} style={{
+              flex:1, padding:'7px 0', fontSize:12, fontWeight:600,
+              background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.25)',
+              borderRadius:8, color:'#a5b4fc', cursor:'pointer',
+            }}>Preview end ⏭</button>
+          </div>
+        </div>
+
+        {/* Error */}
+        {status === 'error' && (
+          <div style={{padding:'10px 14px', borderRadius:10, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', fontSize:12, color:'#fca5a5'}}>
+            ⚠️ {errorMsg}
+          </div>
+        )}
+
+        {/* Start button */}
+        <button
+          onClick={handleStart} disabled={status==='encoding'}
+          style={{
+            width:'100%', padding:'14px 0',
+            background: status==='encoding' ? 'rgba(99,102,241,0.4)' : '#6366f1',
+            border:'none', borderRadius:12,
+            color:'#fff', fontSize:15, fontWeight:700,
+            cursor: status==='encoding' ? 'not-allowed' : 'pointer',
+            boxShadow:'0 4px 16px rgba(99,102,241,0.3)',
+            display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+          }}>
+          {status==='encoding' ? (
+            <>
+              <span style={{width:16,height:16,borderRadius:'50%',border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',animation:'spin 0.7s linear infinite',display:'inline-block'}} />
+              Encoding {formatTime(durSec)} clip...
+            </>
+          ) : <>▶ Start Tracking ({formatTime(durSec)})</>}
+        </button>
+      </div>
+    </div>
+  );
+}

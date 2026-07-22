@@ -22,6 +22,7 @@ import RootLayout from '@/layouts/RootLayout';
 import SAM2DemoPage from '@/routes/DemoPageWrapper';
 import PageNotFoundPage from '@/routes/PageNotFoundPage';
 import ProjectHubPage from '@/routes/ProjectHubPage';
+import TrainPage from '@/routes/TrainPage';
 import useSettingsContext from '@/settings/useSettingsContext';
 import {Route, Routes} from 'react-router-dom';
 
@@ -43,6 +44,9 @@ function DemoApp() {
       <Routes>
         {/* Home page — Project Hub with drafts + previous projects */}
         <Route index={true} element={<ProjectHubPage />} />
+
+        {/* Train YOLO Model page */}
+        <Route path="train" element={<TrainPage />} />
 
         {/* Editor — wrapped in RootLayout with toolbar */}
         <Route element={<RootLayout />}>

@@ -1,5 +1,5 @@
 /**
- * @generated SignedSource<<76014dced98d6c8989e7322712e38963>>
+ * @generated SignedSource<<183f7c2fcd4c9ee55885b6129826e88e>>
  * @lightSyntaxTransform
  * @nogrep
  */
@@ -14,6 +14,7 @@ export type useUploadVideoMutation$variables = {
 };
 export type useUploadVideoMutation$data = {
   readonly uploadVideo: {
+    readonly durationSec: number | null | undefined;
     readonly height: number;
     readonly id: any;
     readonly path: string;
@@ -99,6 +100,13 @@ v1 = [
         "kind": "ScalarField",
         "name": "posterUrl",
         "storageKey": null
+      },
+      {
+        "alias": null,
+        "args": null,
+        "kind": "ScalarField",
+        "name": "durationSec",
+        "storageKey": null
       }
     ],
     "storageKey": null
@@ -122,16 +130,16 @@ return {
     "selections": (v1/*: any*/)
   },
   "params": {
-    "cacheID": "dcbaf1bf411627fdb9dfbb827592cfc0",
+    "cacheID": "c6259226794dde0b87d19e6ba5218902",
     "id": null,
     "metadata": {},
     "name": "useUploadVideoMutation",
     "operationKind": "mutation",
-    "text": "mutation useUploadVideoMutation(\n  $file: Upload!\n) {\n  uploadVideo(file: $file) {\n    id\n    height\n    width\n    url\n    path\n    posterPath\n    posterUrl\n  }\n}\n"
+    "text": "mutation useUploadVideoMutation(\n  $file: Upload!\n) {\n  uploadVideo(file: $file) {\n    id\n    height\n    width\n    url\n    path\n    posterPath\n    posterUrl\n    durationSec\n  }\n}\n"
   }
 };
 })();
 
-(node as any).hash = "710e462504d76597af8695b7fc70b4cf";
+(node as any).hash = "138c82e4b83d6f92d7a1a8155cb09669";
 
 export default node;

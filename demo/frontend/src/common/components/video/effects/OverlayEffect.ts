@@ -56,7 +56,7 @@ export default class OverlayEffect extends BaseGLEffect {
     this._numMasksUniformLocation = gl.getUniformLocation(program, 'uNumMasks');
     gl.uniform1i(this._numMasksUniformLocation, this._numMasks);
 
-    // We know the max number of textures, pre-allocate 3.
+    // Pre-allocate textures for up to 10 objects
     this._maskTextures = preAllocateTextures(gl, 10);
   }
 
@@ -73,7 +73,7 @@ export default class OverlayEffect extends BaseGLEffect {
     const opacity = [0.5, 0.75, 0.35, 0.95][this.variant % 4];
     gl.uniform1f(
       gl.getUniformLocation(program, 'uTime'),
-      context.timeParameter ?? 1.5, // Pass a constant value when no time parameter
+      context.timeParameter ?? 1.5,
     );
     gl.uniform1f(gl.getUniformLocation(program, 'uOpacity'), opacity);
     gl.uniform1i(this._numMasksUniformLocation, context.masks.length);
@@ -140,7 +140,7 @@ export default class OverlayEffect extends BaseGLEffect {
         color.a,
       );
 
-      // 1 byte aligment
+      // 1 byte alignment
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
       gl.texImage2D(
         gl.TEXTURE_2D,
@@ -175,7 +175,6 @@ export default class OverlayEffect extends BaseGLEffect {
     super.cleanup();
 
     if (this._gl != null) {
-      // Delete mask textures to prevent memory leaks
       this._maskTextures.forEach(texture => {
         if (texture != null && this._gl != null) {
           this._gl.deleteTexture(texture);
