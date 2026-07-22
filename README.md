@@ -1,11 +1,11 @@
 <div align="center">
 
-<img src="./assets/banner.png" width="100%" alt="SAM2 Tracker"/>
+<img src="./assets/banner.png" width="100%" alt="QuickLabel — powered by pinklotus.ai"/>
 
 <br/>
 
 <a href="https://github.com/facebookresearch/sam2">
-  <img src="https://img.shields.io/badge/%F0%9F%A4%96-Built_on_SAM2_Meta_AI-0064e0?style=flat-square" />
+  <img src="https://img.shields.io/badge/%F0%9F%A4%96-Powered_by_SAM2-0064e0?style=flat-square" />
 </a>
 <a href="https://github.com/ultralytics/ultralytics">
   <img src="https://img.shields.io/badge/%F0%9F%8E%AF-YOLOv8_Ultralytics-00b4d8?style=flat-square" />
@@ -25,8 +25,8 @@
 
 <br/>
 
-> ***SAM2 Tracker*** is a full-stack web application for **interactive video object tracking**, mask annotation, and **YOLO model training** — powered by Meta's [Segment Anything Model 2](https://github.com/facebookresearch/sam2).
-> Click on any object in a video → SAM2 tracks it across every frame → export annotations → train a custom YOLOv8 detector. **No code required.**
+> ***QuickLabel*** is a full-stack web application for **interactive video object tracking**, mask annotation, and **YOLO model training** — no code required.
+> Upload a video → click any object → tracks across every frame → export annotations → train a custom detector.
 
 ---
 
@@ -34,7 +34,7 @@
 
 <div align="center">
 
-<img src="./assets/demo.gif" width="80%" alt="SAM2 Tracker Demo"/>
+<img src="./assets/demo.gif" width="80%" alt="QuickLabel Demo"/>
 
 *Two players tracked simultaneously — masks propagated across 72 frames at 10 fps*
 
@@ -52,7 +52,7 @@ main
 └── 🪟  windows  ──→  YOU ARE HERE
 ```
 
-> This branch is configured for **Windows 10 / 11**. All scripts use PowerShell (`.ps1`). Run PowerShell as **Administrator** for the install steps.
+> This branch is configured for **Windows 10 / 11**. All scripts use PowerShell (`.ps1`). Run PowerShell as **Administrator** for install steps.
 
 ---
 
@@ -60,29 +60,25 @@ main
 
 ### Prerequisites
 
-| Tool | Install via |
-|------|------------|
+| Tool | Install |
+|------|---------|
 | Python 3.11 | `winget install Python.Python.3.11` |
 | Node.js LTS | `winget install OpenJS.NodeJS.LTS` |
 | ffmpeg | `winget install Gyan.FFmpeg` |
 | Git | `winget install Git.Git` |
 | Yarn | `npm install -g yarn` |
 
-> **Important:** After running `winget` installs, **restart PowerShell** before continuing.
-
----
+> **Restart PowerShell** after all `winget` installs before continuing.
 
 ### Step 1 — Install dependencies
 
 ```powershell
-# Run PowerShell as Administrator
+# Run as Administrator
 winget install Python.Python.3.11
 winget install OpenJS.NodeJS.LTS
 winget install Gyan.FFmpeg
 winget install Git.Git
 ```
-
-> Restart PowerShell after this step.
 
 ### Step 2 — Install Yarn
 
@@ -122,9 +118,9 @@ powershell -ExecutionPolicy Bypass -File run-demo.ps1
 
 ✅ Browser opens automatically → **http://localhost:7262**
 
-> **ffmpeg PATH:** After `winget install Gyan.FFmpeg`, add ffmpeg to your system PATH:
-> `System Properties → Environment Variables → Path → Add: C:\ProgramData\chocolatey\bin` (or wherever ffmpeg was installed).
-> Restart PowerShell to apply.
+> **ffmpeg PATH:** After installing, add ffmpeg's `bin` folder to system PATH manually:
+> `System Properties → Environment Variables → Path → New → C:\path\to\ffmpeg\bin`
+> Restart PowerShell after adding.
 
 ---
 
@@ -132,13 +128,13 @@ powershell -ExecutionPolicy Bypass -File run-demo.ps1
 
 | Feature | Description |
 |---------|-------------|
-| ⚡ One-click tracking | Click any object — SAM2 segments and tracks it instantly |
+| ⚡ One-click tracking | Click any object — segments and tracks instantly |
 | 👥 Multi-object | Track up to 10 objects with colored overlays |
 | ✂️ Timeline crop | Drag handles to set start/end range |
-| 📦 Frame export | `.jpg` + LabelMe `.json` + YOLO `.txt` at any FPS |
-| 🤖 YOLO training | Merge datasets and train YOLOv8 in the browser |
+| 📦 Frame export | `.jpg` + YOLO `.txt` at any FPS |
+| 🤖 YOLO training | Merge datasets and train directly in the browser |
 | 💾 Draft saving | Auto-saved sessions — resume anytime |
-| 🎛️ Model selection | SAM2 Tiny / Small / Base+ / Large |
+| 🎛️ Model selection | Tiny / Small / Base+ / Large |
 
 ---
 
@@ -147,20 +143,20 @@ powershell -ExecutionPolicy Bypass -File run-demo.ps1
 ### Step 1 — Upload & Track
 
 1. Open **http://localhost:7262**
-2. Upload a video (up to 5 min, 250 MB — `.mp4` / `.mov`)
+2. Upload a video (up to 5 min, 250 MB)
 3. Click **"+ Create New Project"**
 4. Set crop range using timeline handles *(optional)*
-5. Click any object → SAM2 segments instantly
+5. Click any object → segments instantly
 6. Press **"Track"** → propagates across all frames
 
 ### Step 2 — Export Frames
 
 1. Open completed project → **"Extract Frames"**
-2. Select FPS (0.5 – 24) → saved as:
+2. Select FPS (0.5 – 24):
 
 ```
 frame_000001.jpg    ← image
-frame_000001.json   ← LabelMe annotation
+frame_000001.json   ← annotation
 frame_000001.txt    ← YOLO bbox
 classes.txt
 ```
@@ -168,13 +164,13 @@ classes.txt
 3. Click **"Convert to YOLO"**:
 
 ```
-YOLODataset/
+YOLODataset\
 ├── images\train\   images\val\
 ├── labels\train\   labels\val\
 └── dataset.yaml
 ```
 
-### Step 3 — Train YOLO
+### Step 3 — Train
 
 1. Click **"🎯 Train YOLO Model"**
 2. Select datasets → **"Merge"** → configure → **"🚀 Start Training"**
@@ -186,12 +182,12 @@ YOLODataset/
 
 | Model | Size | Speed | Accuracy |
 |-------|------|-------|----------|
-| `sam2.1_hiera_tiny.pt` | 38 MB | ⚡⚡⚡ | ★★☆ |
-| `sam2.1_hiera_small.pt` | 46 MB | ⚡⚡ | ★★★ |
-| `sam2.1_hiera_base_plus.pt` | 80 MB | ⚡ | ★★★★ |
-| `sam2.1_hiera_large.pt` | 224 MB | 🐢 | ★★★★★ |
+| Tiny | 38 MB | ⚡⚡⚡ | ★★☆ |
+| Small | 46 MB | ⚡⚡ | ★★★ |
+| Base+ | 80 MB | ⚡ | ★★★★ |
+| Large | 224 MB | 🐢 | ★★★★★ |
 
-Set model in `run-demo.ps1`: `MODEL_SIZE=tiny|small|base_plus|large`
+Set model: `MODEL_SIZE=tiny|small|base_plus|large` in `run-demo.ps1`
 
 ---
 
@@ -199,12 +195,12 @@ Set model in `run-demo.ps1`: `MODEL_SIZE=tiny|small|base_plus|large`
 
 | Problem | Fix |
 |---------|-----|
-| `python: not found` | Reinstall Python 3.11 via `winget`, restart terminal |
-| `ffmpeg: not found` | Add ffmpeg to system PATH, restart terminal |
-| `yarn: not found` | Run `npm install -g yarn`, restart terminal |
+| `python: not found` | Reinstall Python 3.11, check "Add to PATH" during install |
+| `ffmpeg: not found` | Add ffmpeg `bin` folder to system PATH, restart terminal |
+| `yarn: not found` | `npm install -g yarn`, restart terminal |
 | Port 7262/7263 in use | Restart PC or kill process in Task Manager |
-| `venv\Scripts\activate` fails | Run `Set-ExecutionPolicy RemoteSigned` in PowerShell as Admin |
-| Slow tracking | Switch to `tiny` model or shorten crop range |
+| `activate` fails | Run `Set-ExecutionPolicy RemoteSigned` as Admin |
+| Slow tracking | Switch to Tiny model or shorten crop range |
 | Session fails | Close other apps — 8 GB RAM minimum |
 
 ---
@@ -213,11 +209,9 @@ Set model in `run-demo.ps1`: `MODEL_SIZE=tiny|small|base_plus|large`
 
 - [Segment Anything Model 2 (SAM2)](https://github.com/facebookresearch/sam2) — Meta AI Research
 - [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics)
-- [LabelMe](https://github.com/labelmeai/labelme) annotation format
 
 ---
 
 ## :page_facing_up: License
 
 Apache License 2.0 — see [LICENSE](LICENSE) for details.
-SAM2 model weights subject to Meta's [model license](https://github.com/facebookresearch/sam2/blob/main/LICENSE).
