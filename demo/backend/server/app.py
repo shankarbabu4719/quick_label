@@ -1414,6 +1414,206 @@ def list_yolo_datasets() -> Response:
     return make_response({"datasets": results}, 200)
 
 
+# ---------------------------------------------------------------------------
+# CLASSIFY EXPORT — crop tracked objects per frame, save by class name
+# ---------------------------------------------------------------------------
+
+@app.route("/classify_export/<project_name>", methods=["POST"])
+def classify_export(project_name: str) -> Response:
+    """
+    Crop tracked objects from each frame and save by class name.
+
+    Body JSON:
+      {
+        "fps": float,          # extraction fps (default 1.0)
+        "padding": int,        # extra pixels around bbox (default 10)
+        "overwrite": bool      # overwrite existing (default false)
+      }
+
+    Output structure:
+      exports/<project_name>/classification/
+        <class_name>/
+          frame_000001.jpg   ← cropped object only
+          frame_000002.jpg
+          ...
+
+    Returns:
+      { success, classification_dir, counts: {class_name: int}, total }
+    """
+    import json, shutil, subprocess
+
+    try:
+        body      = request.get_json(force=True) or {}
+        fps       = float(body.get("fps", 1.0))
+        padding   = int(body.get("padding", 10))
+        overwrite = bool(body.get("overwrite", False))
+
+        project_folder = EXPORTS_PATH / project_name
+        if not project_folder.exists():
+            return make_response({"error": "Project not found"}, 404)
+
+        video_path = project_folder / "original.mp4"
+        if not video_path.exists():
+            return make_response({"error": "original.mp4 not found"}, 404)
+
+        tracking_json_path = project_folder / "tracking.json"
+        if not tracking_json_path.exists():
+            return make_response({"error": "tracking.json not found"}, 404)
+
+        # ── Load tracking.json ────────────────────────────────────────────
+        with open(tracking_json_path, "r", encoding="utf-8") as f:
+            td = json.load(f)
+
+        objects_list = td.get("objects", [])
+        num_tracking_frames = td.get("num_frames", 0)
+        label_map = {
+            obj["object_id"]: obj.get("label", f"object_{obj['object_id']}")
+            for obj in objects_list
+        }
+        tracking_data: dict = {}
+        for frame in td.get("frames", []):
+            tracking_data[frame["frame_index"]] = frame.get("masks", [])
+        if not num_tracking_frames and tracking_data:
+            num_tracking_frames = max(tracking_data.keys()) + 1
+
+        if not tracking_data:
+            return make_response({"error": "No tracking data found in tracking.json"}, 400)
+
+        # ── Compute encode fps ────────────────────────────────────────────
+        encode_fps = 10.0
+        try:
+            ffprobe = shutil.which("ffprobe")
+            if ffprobe and num_tracking_frames > 0:
+                probe = subprocess.run(
+                    [ffprobe, "-v", "quiet", "-show_entries", "format=duration",
+                     "-of", "json", str(video_path)],
+                    capture_output=True, text=True
+                )
+                probe_data = json.loads(probe.stdout)
+                duration = float(probe_data.get("format", {}).get("duration", 0))
+                if duration > 0:
+                    encode_fps = num_tracking_frames / duration
+        except Exception as e:
+            logger.warning(f"classify_export: could not compute encode_fps: {e}")
+
+        # ── Classification output dir ─────────────────────────────────────
+        classify_dir = project_folder / "classification"
+        if classify_dir.exists() and overwrite:
+            shutil.rmtree(classify_dir)
+
+        # ── Extract raw frames from original.mp4 ─────────────────────────
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return make_response({"error": "ffmpeg not found"}, 500)
+
+        tmp_frames_dir = project_folder / "_classify_tmp_frames"
+        if tmp_frames_dir.exists():
+            shutil.rmtree(tmp_frames_dir)
+        os.makedirs(tmp_frames_dir, exist_ok=True)
+
+        cmd = [
+            ffmpeg, "-y", "-i", str(video_path),
+            "-vf", f"fps={fps}",
+            "-q:v", "2", "-threads", "2",
+            str(tmp_frames_dir / "frame_%06d.jpg"),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            shutil.rmtree(tmp_frames_dir, ignore_errors=True)
+            return make_response({"error": "Frame extraction failed", "details": result.stderr[-300:]}, 500)
+
+        frame_files = sorted(tmp_frames_dir.glob("*.jpg"))
+        if not frame_files:
+            return make_response({"error": "No frames extracted"}, 500)
+
+        # ── Crop and save per class ───────────────────────────────────────
+        try:
+            from PIL import Image
+            from pycocotools.mask import toBbox
+        except ImportError as e:
+            shutil.rmtree(tmp_frames_dir, ignore_errors=True)
+            return make_response({"error": f"Missing dependency: {e}"}, 500)
+
+        counts: dict = {}
+
+        for i, frame_file in enumerate(frame_files):
+            extracted_sec = i / fps
+            track_idx = int(round(extracted_sec * encode_fps))
+            track_idx = min(track_idx, max(tracking_data.keys()))
+
+            masks = tracking_data.get(track_idx, [])
+            if not masks:
+                continue
+
+            img = Image.open(frame_file).convert("RGB")
+            W, H = img.size
+
+            for mask_entry in masks:
+                obj_id = mask_entry.get("object_id", 0)
+                rle    = mask_entry.get("mask", {})
+                if not rle:
+                    continue
+
+                # Get class name from label_map
+                class_name = label_map.get(obj_id, f"object_{obj_id}")
+                # Sanitize for folder name
+                safe_class = "".join(c if c.isalnum() or c in "_-" else "_" for c in class_name)
+
+                # Decode bbox from RLE
+                try:
+                    counts_val = rle.get("counts", "")
+                    size_val   = rle.get("size", [])
+                    if isinstance(counts_val, str):
+                        counts_val = counts_val.encode("utf-8")
+                    bbox = toBbox({"counts": counts_val, "size": size_val})
+                    bx, by, bw, bh = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+                except Exception as be:
+                    logger.warning(f"classify_export: bbox decode failed frame {i} obj {obj_id}: {be}")
+                    continue
+
+                if bw < 2 or bh < 2:
+                    continue
+
+                # Apply padding, clamp to image bounds
+                x0 = max(0, int(bx) - padding)
+                y0 = max(0, int(by) - padding)
+                x1 = min(W, int(bx + bw) + padding)
+                y1 = min(H, int(by + bh) + padding)
+
+                if x1 - x0 < 2 or y1 - y0 < 2:
+                    continue
+
+                # Crop
+                crop = img.crop((x0, y0, x1, y1))
+
+                # Save to classification/<class_name>/
+                out_dir = classify_dir / safe_class
+                os.makedirs(out_dir, exist_ok=True)
+
+                frame_num   = i + 1
+                out_filename = f"frame_{frame_num:06d}_obj{obj_id}.jpg"
+                crop.save(out_dir / out_filename, "JPEG", quality=92)
+
+                counts[safe_class] = counts.get(safe_class, 0) + 1
+
+        # ── Cleanup tmp frames ────────────────────────────────────────────
+        shutil.rmtree(tmp_frames_dir, ignore_errors=True)
+
+        total = sum(counts.values())
+        logger.info(f"classify_export: saved {total} crops → {classify_dir}")
+
+        return make_response({
+            "success"          : True,
+            "classification_dir": str(classify_dir),
+            "counts"           : counts,
+            "total"            : total,
+        }, 200)
+
+    except Exception as e:
+        logger.error(f"classify_export error: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
 @app.route("/merge_datasets", methods=["POST"])
 def merge_datasets() -> Response:
     """
