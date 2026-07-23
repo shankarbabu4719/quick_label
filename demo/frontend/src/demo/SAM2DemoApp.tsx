@@ -23,6 +23,7 @@ import SAM2DemoPage from '@/routes/DemoPageWrapper';
 import PageNotFoundPage from '@/routes/PageNotFoundPage';
 import ProjectHubPage from '@/routes/ProjectHubPage';
 import TrainPage from '@/routes/TrainPage';
+import ClassificationPage from '@/routes/ClassificationPage';
 import useSettingsContext from '@/settings/useSettingsContext';
 import {Route, Routes} from 'react-router-dom';
 
@@ -47,6 +48,9 @@ function DemoApp() {
 
         {/* Train YOLO Model page */}
         <Route path="train" element={<TrainPage />} />
+
+        {/* Classification Export page */}
+        <Route path="classify" element={<ClassificationPage />} />
 
         {/* Editor — wrapped in RootLayout with toolbar */}
         <Route element={<RootLayout />}>

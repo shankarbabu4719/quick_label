@@ -230,7 +230,7 @@ export default function ProjectHubPage() {
             fontSize:18, boxShadow:'0 0 16px rgba(99,102,241,0.4)',
           }}>⬡</div>
           <div>
-            <div style={{fontWeight:700, fontSize:16, letterSpacing:'-0.3px', lineHeight:1.1}}>SAM2 Tracker</div>
+            <div style={{fontWeight:700, fontSize:16, letterSpacing:'-0.3px', lineHeight:1.1}}>QuickLabel</div>
             <div style={{fontSize:10, color:C.textDim, letterSpacing:'0.06em', textTransform:'uppercase'}}>AI Object Tracking</div>
           </div>
         </div>
@@ -265,7 +265,7 @@ export default function ProjectHubPage() {
               fontSize:12, fontWeight:600, color:'#a5b4fc',
               letterSpacing:'0.05em', marginBottom:20,
             }}>
-              ✦ Powered by Meta SAM 2
+              ✦ powered by pinklotus.ai
             </div>
             <h1 style={{
               fontSize:52, fontWeight:800, margin:'0 0 16px',
@@ -301,8 +301,8 @@ export default function ProjectHubPage() {
             ))}
           </div>
 
-          {/* Train YOLO Model button */}
-          <div style={{display:'flex', justifyContent:'center', marginBottom:8}}>
+          {/* Action buttons — Train YOLO + Classification Export */}
+          <div style={{display:'flex', justifyContent:'center', gap:12, marginBottom:8}}>
             <button
               onClick={() => navigate('/train')}
               style={{
@@ -324,6 +324,28 @@ export default function ProjectHubPage() {
                 e.currentTarget.style.boxShadow='0 2px 12px rgba(99,102,241,0.2)';
               }}>
               🎯 Train YOLO Model
+            </button>
+            <button
+              onClick={() => navigate('/classify')}
+              style={{
+                display:'flex', alignItems:'center', gap:10,
+                padding:'12px 28px',
+                background:'linear-gradient(135deg,rgba(236,72,153,0.15),rgba(219,39,119,0.15))',
+                border:'1px solid rgba(236,72,153,0.35)',
+                borderRadius:12, cursor:'pointer',
+                color:'#f9a8d4', fontSize:14, fontWeight:700,
+                boxShadow:'0 2px 12px rgba(236,72,153,0.2)',
+                transition:'all 0.18s',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.background='linear-gradient(135deg,rgba(236,72,153,0.25),rgba(219,39,119,0.25))';
+                e.currentTarget.style.boxShadow='0 4px 20px rgba(236,72,153,0.35)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background='linear-gradient(135deg,rgba(236,72,153,0.15),rgba(219,39,119,0.15))';
+                e.currentTarget.style.boxShadow='0 2px 12px rgba(236,72,153,0.2)';
+              }}>
+              🏷️ Classification Export
             </button>
           </div>
 
@@ -380,7 +402,7 @@ export default function ProjectHubPage() {
                 </span>
                 <div>
                   <div style={{fontSize:12, fontWeight:700, color:'#818cf8'}}>
-                    SAM 2.1 {currentModel === 'base_plus' ? 'Base+' : currentModel.charAt(0).toUpperCase() + currentModel.slice(1)}
+                    Model {currentModel === 'base_plus' ? 'Base+' : currentModel.charAt(0).toUpperCase() + currentModel.slice(1)}
                   </div>
                   <div style={{fontSize:11, color:'rgba(255,255,255,0.3)'}}>Active model</div>
                 </div>
