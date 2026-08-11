@@ -72,8 +72,9 @@ fi
 echo "🔧 Starting backend on port 7263..."
 cd "$PROJECT_ROOT/demo/backend/server"
 
-# Ubuntu: no macOS flags, CUDA auto-detected if available
-SAM2_DEMO_FORCE_CPU_DEVICE=1 \
+# Ubuntu: GPU enabled by default (CUDA auto-detected)
+# To force CPU: set SAM2_DEMO_FORCE_CPU_DEVICE=1
+SAM2_DEMO_FORCE_CPU_DEVICE=0 \
 APP_ROOT="$PROJECT_ROOT/" \
 API_URL=http://localhost:7263 \
 MODEL_SIZE=tiny \

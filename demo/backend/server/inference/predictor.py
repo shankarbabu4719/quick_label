@@ -64,14 +64,20 @@ class InferenceAPI:
         # select the device for computation
         force_cpu_device = os.environ.get("SAM2_DEMO_FORCE_CPU_DEVICE", "0") == "1"
         if force_cpu_device:
-            logger.info("forcing CPU device for SAM 2 demo")
-        if torch.cuda.is_available() and not force_cpu_device:
+            logger.info("⚠️  FORCING CPU DEVICE (SAM2_DEMO_FORCE_CPU_DEVICE=1)")
+            device = torch.device("cpu")
+        elif torch.cuda.is_available():
             device = torch.device("cuda")
-        elif torch.backends.mps.is_available() and not force_cpu_device:
+            logger.info(f"🚀 GPU DETECTED: {torch.cuda.get_device_name(0)}")
+            logger.info(f"   GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+        elif torch.backends.mps.is_available():
             device = torch.device("mps")
+            logger.info("🍎 Using Apple MPS (Metal Performance Shaders)")
         else:
             device = torch.device("cpu")
-        logger.info(f"using device: {device}")
+            logger.warning("⚠️  No GPU detected - falling back to CPU (will be slow!)")
+        
+        logger.info(f"✅ Using device: {device}")
 
         if device.type == "cuda":
             # turn on tfloat32 for Ampere GPUs (https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices)
