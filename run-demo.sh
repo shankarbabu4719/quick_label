@@ -68,7 +68,7 @@ env $EXTRA_ENV \
   VIDEO_ENCODE_MAX_FRAMES=300 \
   VIDEO_ENCODE_FPS=10 \
   FFMPEG_NUM_THREADS=4 \
-  python app.py 2>&1 &
+  "$PROJECT_ROOT/venv/bin/python" app.py 2>&1 &
 
 BACKEND_PID=$!
 cd "$PROJECT_ROOT"

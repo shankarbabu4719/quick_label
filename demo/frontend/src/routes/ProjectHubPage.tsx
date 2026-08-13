@@ -481,6 +481,15 @@ export default function ProjectHubPage() {
 
         <div style={{height:48}} />
 
+        {/* ── Verify Masks Tool (Independent) ── */}
+        {projects.length > 0 && (
+          <>
+            <SectionHeader title="🔍 Verify Masks" count={0} accentColor="#0ea5e9" icon="🔍" />
+            <VerifyMasksSection projects={projects} />
+            <div style={{height:48}} />
+          </>
+        )}
+
         {/* ── Drafts ── */}
         <SectionHeader title="Draft Projects" count={drafts.length} accentColor={C.amber} icon="⏸" />
         {!modelSelected && drafts.length > 0 && (
@@ -705,7 +714,37 @@ function ProjectDetailModal({project, onClose}: {
   const [yoloResult, setYoloResult] = useState<{trainCount:number;valCount:number;yoloDir:string}|null>(null);
   const [yoloError, setYoloError]   = useState('');
 
+  // verify masks state
+  const [verifyStatus, setVerifyStatus] = useState<'idle'|'loading'|'success'|'error'>('idle');
+  const [verifyResult, setVerifyResult] = useState<{outputDir:string; frameCount:number}|null>(null);
+  const [verifyError, setVerifyError]   = useState('');
+  const [availableFrameDirs, setAvailableFrameDirs] = useState<string[]>([]);
+  const [selectedFrameDir, setSelectedFrameDir] = useState<string>('');
+  const [checkingFrames, setCheckingFrames] = useState(false);
+
   const FPS_OPTIONS = ['0.5','1','2','5','10','24'];
+
+  // Check for existing frame directories on mount
+  useEffect(() => {
+    async function checkExistingFrames() {
+      setCheckingFrames(true);
+      try {
+        const r = await fetch(`http://localhost:7263/list_frame_dirs/${project.name}`);
+        if (r.ok) {
+          const d = await r.json();
+          if (d.frame_dirs && d.frame_dirs.length > 0) {
+            setAvailableFrameDirs(d.frame_dirs);
+            setSelectedFrameDir(d.frame_dirs[0]);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to check existing frames:', e);
+      } finally {
+        setCheckingFrames(false);
+      }
+    }
+    checkExistingFrames();
+  }, [project.name]);
 
   function downloadJSON() {
     const a = document.createElement('a');
@@ -748,6 +787,26 @@ function ProjectDetailModal({project, onClose}: {
       setYoloResult({trainCount:d.train_count, valCount:d.val_count, yoloDir:d.yolo_dir});
       setYoloStatus('success');
     } catch { setYoloError('Network error'); setYoloStatus('error'); }
+  }
+
+  async function handleVerifyMasks() {
+    const frameDirToUse = selectedFrameDir || extractResult?.framesDir;
+    if (!frameDirToUse) {
+      setVerifyError('No frames directory selected');
+      setVerifyStatus('error');
+      return;
+    }
+    setVerifyStatus('loading'); setVerifyError('');
+    try {
+      const r = await fetch(`http://localhost:7263/verify_masks/${project.name}`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({frames_dir: frameDirToUse}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) { setVerifyError(d.error||'Failed'); setVerifyStatus('error'); return; }
+      setVerifyResult({outputDir: d.output_dir, frameCount: d.frame_count});
+      setVerifyStatus('success');
+    } catch { setVerifyError('Network error'); setVerifyStatus('error'); }
   }
 
   return (
@@ -850,6 +909,81 @@ function ProjectDetailModal({project, onClose}: {
             </div>
           )}
         </div>
+
+        {/* ── Verify Masks ── (independent section, works with existing frames) */}
+        {(availableFrameDirs.length > 0 || extractStatus==='success') && (
+          <div style={{
+            padding:'16px', borderRadius:12,
+            background:'rgba(14,165,233,0.06)',
+            border:'1px solid rgba(14,165,233,0.18)',
+            marginBottom:16,
+          }}>
+            <SectionLabel>🔍 Verify Masks</SectionLabel>
+            <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginBottom:12,lineHeight:1.5}}>
+              Draw colored rectangles + labels on frames to verify JSON accuracy
+            </div>
+
+            {/* Frame directory selector (if multiple exist) */}
+            {availableFrameDirs.length > 0 && (
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginBottom:6,fontWeight:600}}>
+                  SELECT FRAMES FOLDER:
+                </div>
+                <select 
+                  value={selectedFrameDir} 
+                  onChange={e => setSelectedFrameDir(e.target.value)}
+                  style={{
+                    width:'100%', padding:'8px 10px', borderRadius:8,
+                    background:'rgba(255,255,255,0.05)', 
+                    border:'1px solid rgba(255,255,255,0.15)',
+                    color:'#fff', fontSize:12, cursor:'pointer',
+                  }}>
+                  {availableFrameDirs.map(dir => (
+                    <option key={dir} value={dir}>{dir}</option>
+                  ))}
+                  {extractResult && !availableFrameDirs.includes(extractResult.framesDir) && (
+                    <option value={extractResult.framesDir}>{extractResult.framesDir} (new)</option>
+                  )}
+                </select>
+              </div>
+            )}
+
+            {verifyStatus==='error' && (
+              <div style={{marginBottom:10,padding:'8px 10px',borderRadius:8,
+                background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)',
+                fontSize:12,color:'#fca5a5'}}>⚠️ {verifyError}</div>
+            )}
+
+            <button onClick={handleVerifyMasks} disabled={verifyStatus==='loading'} style={{
+              width:'100%', padding:'10px 0',
+              background: verifyStatus==='loading'?'rgba(14,165,233,0.4)':'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)',
+              border:'none', borderRadius:10, color:'#fff',
+              fontSize:13, fontWeight:700,
+              cursor: verifyStatus==='loading'?'not-allowed':'pointer',
+              display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+              boxShadow:'0 2px 8px rgba(14,165,233,0.3)',
+            }}>
+              {verifyStatus==='loading' ? (
+                <>
+                  <span style={{width:13,height:13,borderRadius:'50%',border:'2px solid rgba(255,255,255,0.3)',borderTopColor:'#fff',animation:'spin 0.7s linear infinite',display:'inline-block'}}/>
+                  Verifying masks...
+                </>
+              ) : verifyStatus==='success' ? (
+                <>✅ Re-verify Masks</>
+              ) : (
+                <>🔍 Verify Masks (Draw on Frames)</>
+              )}
+            </button>
+
+            {verifyStatus==='success' && verifyResult && (
+              <div style={{marginTop:10,padding:'10px 12px',borderRadius:8,
+                background:'rgba(14,165,233,0.08)',border:'1px solid rgba(14,165,233,0.25)',
+                fontSize:12,color:'#7dd3fc'}}>
+                ✅ <strong>{verifyResult.frameCount}</strong> frames visualized → <code style={{fontSize:10}}>{verifyResult.outputDir}/</code>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Convert to YOLO ── (shown after extract) */}
         {extractStatus==='success' && (
@@ -1550,6 +1684,204 @@ function CropAndStartModal({video, onClose, onStart}: {
           ) : <>▶ Start Tracking ({formatTime(durSec)})</>}
         </button>
       </div>
+    </div>
+  );
+}
+
+
+// ── Verify Masks Section (Independent Tool) ────────────────────────
+function VerifyMasksSection({projects}: {projects: ExportProject[]}) {
+  const [selectedProject, setSelectedProject] = useState<string>('');
+  const [availableFrames, setAvailableFrames] = useState<string[]>([]);
+  const [selectedFrameDir, setSelectedFrameDir] = useState<string>('');
+  const [verifying, setVerifying] = useState(false);
+  const [result, setResult] = useState<{outputDir: string; frameCount: number} | null>(null);
+  const [error, setError] = useState('');
+
+  // Load frame directories when project selected
+  useEffect(() => {
+    if (!selectedProject) {
+      setAvailableFrames([]);
+      setSelectedFrameDir('');
+      return;
+    }
+
+    async function loadFrames() {
+      try {
+        const r = await fetch(`http://localhost:7263/list_frame_dirs/${selectedProject}`);
+        if (r.ok) {
+          const d = await r.json();
+          if (d.frame_dirs && d.frame_dirs.length > 0) {
+            setAvailableFrames(d.frame_dirs);
+            setSelectedFrameDir(d.frame_dirs[0]);
+          } else {
+            setAvailableFrames([]);
+            setError('No extracted frames found for this project. Extract frames first.');
+          }
+        }
+      } catch (e) {
+        setError('Failed to load frame directories');
+      }
+    }
+    loadFrames();
+  }, [selectedProject]);
+
+  async function handleVerify() {
+    if (!selectedProject || !selectedFrameDir) return;
+    
+    setVerifying(true);
+    setError('');
+    setResult(null);
+
+    try {
+      const r = await fetch(`http://localhost:7263/verify_masks/${selectedProject}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({frames_dir: selectedFrameDir}),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setError(d.error || 'Verification failed');
+        return;
+      }
+      setResult({outputDir: d.output_dir, frameCount: d.frame_count});
+    } catch (e) {
+      setError('Network error');
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  return (
+    <div style={{
+      padding: '24px', borderRadius: 14,
+      background: 'linear-gradient(135deg, rgba(14,165,233,0.08) 0%, rgba(6,182,212,0.05) 100%)',
+      border: '1px solid rgba(14,165,233,0.2)',
+      maxWidth: 800, margin: '0 auto',
+    }}>
+      <div style={{fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 16, lineHeight: 1.6}}>
+        Verify that your JSON masks are correctly aligned with frames by drawing colored rectangles + labels.
+      </div>
+
+      {/* Project selector */}
+      <div style={{marginBottom: 14}}>
+        <div style={{fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 6, fontWeight: 600, letterSpacing: '0.05em'}}>
+          SELECT PROJECT:
+        </div>
+        <select
+          value={selectedProject}
+          onChange={e => {
+            setSelectedProject(e.target.value);
+            setResult(null);
+            setError('');
+          }}
+          style={{
+            width: '100%', padding: '10px 12px', borderRadius: 10,
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            color: '#fff', fontSize: 13, cursor: 'pointer',
+            fontWeight: 600,
+          }}>
+          <option value="">-- Choose a completed project --</option>
+          {projects.map(p => (
+            <option key={p.name} value={p.name}>
+              {p.displayName || p.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Frame directory selector (if frames exist) */}
+      {availableFrames.length > 0 && (
+        <div style={{marginBottom: 14}}>
+          <div style={{fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 6, fontWeight: 600, letterSpacing: '0.05em'}}>
+            SELECT FRAMES FOLDER:
+          </div>
+          <select
+            value={selectedFrameDir}
+            onChange={e => {
+              setSelectedFrameDir(e.target.value);
+              setResult(null);
+            }}
+            style={{
+              width: '100%', padding: '10px 12px', borderRadius: 10,
+              background: 'rgba(255,255,255,0.06)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              color: '#fff', fontSize: 13, cursor: 'pointer',
+              fontWeight: 600,
+            }}>
+            {availableFrames.map(dir => (
+              <option key={dir} value={dir}>{dir}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Error message */}
+      {error && (
+        <div style={{
+          marginBottom: 14, padding: '10px 12px', borderRadius: 8,
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+          fontSize: 12, color: '#fca5a5', lineHeight: 1.5,
+        }}>
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* Verify button */}
+      <button
+        onClick={handleVerify}
+        disabled={!selectedProject || !selectedFrameDir || verifying}
+        style={{
+          width: '100%', padding: '12px 0',
+          background: (!selectedProject || !selectedFrameDir || verifying) 
+            ? 'rgba(14,165,233,0.3)' 
+            : 'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)',
+          border: 'none', borderRadius: 10, color: '#fff',
+          fontSize: 14, fontWeight: 700,
+          cursor: (!selectedProject || !selectedFrameDir || verifying) ? 'not-allowed' : 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          boxShadow: '0 4px 12px rgba(14,165,233,0.3)',
+          transition: 'all 0.2s',
+        }}>
+        {verifying ? (
+          <>
+            <span style={{
+              width: 14, height: 14, borderRadius: '50%',
+              border: '2px solid rgba(255,255,255,0.3)',
+              borderTopColor: '#fff',
+              animation: 'spin 0.7s linear infinite',
+              display: 'inline-block',
+            }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            Verifying masks...
+          </>
+        ) : (
+          <>🔍 Verify Masks (Draw Rectangles + Labels)</>
+        )}
+      </button>
+
+      {/* Success result */}
+      {result && (
+        <div style={{
+          marginTop: 14, padding: '12px 14px', borderRadius: 10,
+          background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.3)',
+        }}>
+          <div style={{fontSize: 14, fontWeight: 700, color: '#86efac', marginBottom: 4}}>
+            ✅ Verification Complete!
+          </div>
+          <div style={{fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 1.6}}>
+            <strong>{result.frameCount}</strong> frames with colored rectangles + labels saved to:
+          </div>
+          <div style={{
+            marginTop: 6, padding: '6px 10px', borderRadius: 6,
+            background: 'rgba(0,0,0,0.3)',
+            fontFamily: 'monospace', fontSize: 11, color: '#86efac',
+          }}>
+            demo/data/exports/{selectedProject}/{result.outputDir}/
+          </div>
+        </div>
+      )}
     </div>
   );
 }

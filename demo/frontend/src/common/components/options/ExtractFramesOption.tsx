@@ -30,6 +30,14 @@ export default function ExtractFramesOption() {
   } | null>(null);
   const [yoloError, setYoloError]   = useState('');
 
+  // Verify masks state
+  const [verifying, setVerifying] = useState(false);
+  const [verifyResult, setVerifyResult] = useState<{
+    outputDir: string;
+    frameCount: number;
+  } | null>(null);
+  const [verifyError, setVerifyError] = useState('');
+
   const session   = useAtomValue(sessionAtom);
   const cropRange = useAtomValue(cropRangeAtom);
 
@@ -108,6 +116,39 @@ export default function ExtractFramesOption() {
     }
   }, [extracted, valPct]);
 
+  // ── Verify Masks ──────────────────────────────────────────────────
+  const handleVerifyMasks = useCallback(async () => {
+    if (!extracted) return;
+    setVerifying(true);
+    setVerifyError('');
+    setVerifyResult(null);
+    try {
+      const r = await fetch(
+        `${INFERENCE_API_ENDPOINT}/verify_masks/${extracted.projectName}`,
+        {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            frames_dir: extracted.framesDir,
+          }),
+        },
+      );
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        setVerifyError(d.error || 'Verification failed');
+        return;
+      }
+      setVerifyResult({
+        outputDir: d.output_dir,
+        frameCount: d.frame_count,
+      });
+    } catch (e) {
+      setVerifyError('Network error — is the backend running?');
+    } finally {
+      setVerifying(false);
+    }
+  }, [extracted]);
+
   return (
     <div style={{width: '100%'}}>
 
@@ -157,6 +198,76 @@ export default function ExtractFramesOption() {
           }}>
             ✅ <strong>{extracted.frameCount}</strong> frames extracted →{' '}
             <code style={{fontSize: 10}}>{extracted.framesDir}/</code>
+          </div>
+
+          {/* ── Verify Masks Button ── */}
+          <div style={{marginBottom: 12}}>
+            <button
+              onClick={handleVerifyMasks}
+              disabled={verifying}
+              style={{
+                width: '100%', padding: '10px 0',
+                background: verifying ? 'rgba(14,165,233,0.4)' : 'linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)',
+                border: 'none', borderRadius: 8,
+                color: '#fff', fontSize: 12, fontWeight: 700,
+                cursor: verifying ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center',
+                justifyContent: 'center', gap: 8,
+                boxShadow: '0 2px 8px rgba(14,165,233,0.3)',
+                transition: 'all 0.2s',
+              }}>
+              {verifying ? (
+                <>
+                  <span style={{
+                    width: 11, height: 11, borderRadius: '50%',
+                    border: '2px solid rgba(255,255,255,0.3)',
+                    borderTopColor: '#fff',
+                    animation: 'spin 0.7s linear infinite',
+                    display: 'inline-block',
+                  }} />
+                  Verifying masks...
+                </>
+              ) : (
+                <>🔍 Verify Masks (Draw on Frames)</>
+              )}
+            </button>
+
+            {verifyError && (
+              <div style={{
+                marginTop: 8, padding: '6px 10px', borderRadius: 6,
+                background: 'rgba(239,68,68,0.08)',
+                border: '1px solid rgba(239,68,68,0.2)',
+                fontSize: 11, color: '#fca5a5',
+              }}>⚠️ {verifyError}</div>
+            )}
+
+            {verifyResult && (
+              <div style={{
+                marginTop: 8, padding: '10px 12px', borderRadius: 8,
+                background: 'rgba(14,165,233,0.08)',
+                border: '1px solid rgba(14,165,233,0.25)',
+              }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 700, color: '#7dd3fc',
+                  marginBottom: 4,
+                }}>
+                  ✅ Masks Visualized!
+                </div>
+                <div style={{
+                  fontSize: 11, color: 'rgba(255,255,255,0.5)',
+                  lineHeight: 1.6,
+                }}>
+                  <strong>{verifyResult.frameCount}</strong> frames with colored mask overlays →{' '}
+                  <code style={{
+                    fontSize: 10, color: '#7dd3fc',
+                    background: 'rgba(14,165,233,0.15)',
+                    padding: '1px 6px', borderRadius: 4,
+                  }}>
+                    {verifyResult.outputDir}/
+                  </code>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ── YOLO Dataset Convert ── */}

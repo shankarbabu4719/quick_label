@@ -5,6 +5,8 @@
 
 import logging
 import os
+import json
+import re
 from pathlib import Path
 from typing import Any, Generator
 
@@ -569,10 +571,11 @@ def extract_frames(project_name: str) -> Response:
         # Build label lookup: object_id → label
         label_map = {obj["object_id"]: obj.get("label", f"object_{obj['object_id']}") for obj in objects_list}
 
-        # ── Draw bounding boxes on frames for "masked" source ────────────────
+        # ── Draw full segmentation masks on frames for "masked" source ─────────
         if source == "masked" and tracking_data:
             try:
                 from PIL import Image, ImageDraw, ImageFont
+                import numpy as np
 
                 # Same 10 colors as the frontend THEME_COLORS
                 COLORS = [
@@ -587,8 +590,21 @@ def extract_frames(project_name: str) -> Response:
                     (250, 125, 200),  # #FA7DC8
                     (160, 255,  80),  # #A0FF50
                 ]
-                BOX_ALPHA  = 50  # fill transparency (0-255)
-                LINE_WIDTH = 3   # border thickness in pixels
+                MASK_ALPHA = 128  # mask transparency (0-255)
+                LINE_WIDTH = 2    # border thickness in pixels
+
+                def decode_rle_mask(rle_counts, size):
+                    """Decode RLE mask to binary numpy array."""
+                    try:
+                        from pycocotools import mask as mask_utils
+                        if isinstance(rle_counts, str):
+                            rle_dict = {"counts": rle_counts.encode('utf-8'), "size": list(size)}
+                        else:
+                            rle_dict = {"counts": rle_counts, "size": list(size)}
+                        return mask_utils.decode(rle_dict)
+                    except Exception as e:
+                        logger.warning(f"Failed to decode RLE mask: {e}")
+                        return None
 
                 for i, frame_file in enumerate(frame_files):
                     extracted_sec = i / fps
@@ -601,9 +617,9 @@ def extract_frames(project_name: str) -> Response:
                         continue  # no objects in this frame — keep plain image
 
                     img = Image.open(frame_file).convert("RGB")
+                    img_array = np.array(img)
                     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
                     draw = ImageDraw.Draw(overlay)
-                    img_draw = ImageDraw.Draw(img)
 
                     for mask_entry in frame_data["masks"]:
                         obj_id = mask_entry.get("object_id", 0)
@@ -611,47 +627,73 @@ def extract_frames(project_name: str) -> Response:
                         if not rle:
                             continue
 
-                        bbox = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
-                        if not bbox or len(bbox) < 4:
-                            continue
-
-                        bx, by, bw, bh = bbox
-                        x0, y0 = int(bx), int(by)
-                        x1, y1 = int(bx + bw), int(by + bh)
                         color  = COLORS[obj_id % len(COLORS)]
                         label  = label_map.get(obj_id, f"object_{obj_id}")
 
-                        # Semi-transparent fill
-                        draw.rectangle([x0, y0, x1, y1], fill=(*color, BOX_ALPHA))
+                        # Decode RLE to binary mask
+                        mask = decode_rle_mask(rle.get("counts", ""), rle.get("size", []))
+                        if mask is None or mask.size == 0:
+                            continue
 
-                        # Solid border
-                        for t in range(LINE_WIDTH):
-                            img_draw.rectangle(
-                                [x0 + t, y0 + t, x1 - t, y1 - t],
-                                outline=color,
-                            )
+                        # Resize mask if dimensions don't match
+                        if mask.shape[0] != img.height or mask.shape[1] != img.width:
+                            try:
+                                from scipy.ndimage import zoom
+                                scale_h = img.height / mask.shape[0]
+                                scale_w = img.width / mask.shape[1]
+                                mask = zoom(mask, (scale_h, scale_w), order=0)
+                            except ImportError:
+                                # Fallback: use PIL resize
+                                mask_img = Image.fromarray((mask * 255).astype(np.uint8))
+                                mask_img = mask_img.resize((img.width, img.height), Image.NEAREST)
+                                mask = np.array(mask_img) > 0
 
-                        # Label chip (top-left corner of box)
-                        font_size = max(14, img.height // 30)
+                        # Create colored mask overlay
+                        colored_mask = np.zeros((*mask.shape, 4), dtype=np.uint8)
+                        colored_mask[mask > 0] = (*color, MASK_ALPHA)
+                        
+                        # Convert to PIL and composite
+                        mask_overlay = Image.fromarray(colored_mask, mode='RGBA')
+                        overlay = Image.alpha_composite(overlay, mask_overlay)
+
+                        # Draw contour/border around mask
                         try:
-                            font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
-                        except Exception:
-                            font = ImageFont.load_default()
+                            from scipy.ndimage import binary_erosion
+                            eroded = binary_erosion(mask, iterations=LINE_WIDTH)
+                            contour = mask & ~eroded
+                            contour_coords = np.column_stack(np.where(contour))
+                            for y, x in contour_coords[::2]:  # Draw every 2nd pixel for performance
+                                draw.point((x, y), fill=(*color, 255))
+                        except ImportError:
+                            pass  # Skip contour if scipy not available
 
-                        tb = font.getbbox(label) if hasattr(font, 'getbbox') else (0, 0, len(label) * 8, font_size)
-                        tw = tb[2] - tb[0] + 8
-                        th = tb[3] - tb[1] + 6
-                        lx0 = x0
-                        ly0 = max(0, y0 - th)
-                        draw.rectangle([lx0, ly0, lx0 + tw, ly0 + th], fill=(*color, 220))
-                        draw.text((lx0 + 4, ly0 + 3), label, fill=(255, 255, 255, 255), font=font)
+                        # Get bounding box for label placement
+                        bbox = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
+                        if bbox and len(bbox) >= 4:
+                            bx, by, bw, bh = bbox
+                            x0, y0 = int(bx), int(by)
 
-                    # Composite semi-transparent fill + labels onto image
+                            # Label chip (top-left corner of mask)
+                            font_size = max(14, img.height // 30)
+                            try:
+                                font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                            except Exception:
+                                font = ImageFont.load_default()
+
+                            tb = font.getbbox(label) if hasattr(font, 'getbbox') else (0, 0, len(label) * 8, font_size)
+                            tw = tb[2] - tb[0] + 8
+                            th = tb[3] - tb[1] + 6
+                            lx0 = x0
+                            ly0 = max(0, y0 - th)
+                            draw.rectangle([lx0, ly0, lx0 + tw, ly0 + th], fill=(*color, 220))
+                            draw.text((lx0 + 4, ly0 + 3), label, fill=(255, 255, 255, 255), font=font)
+
+                    # Composite mask overlay onto image
                     composited = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
                     composited.save(str(frame_file), "JPEG", quality=92)
 
             except ImportError as ie:
-                logger.warning(f"PIL not available for bbox draw: {ie}. Saving plain frames.")
+                logger.warning(f"Required libraries not available for mask visualization: {ie}. Saving plain frames.")
 
         # Build class index: object_id → class_id (0-based, ordered by objects_list)
         class_id_map = {obj["object_id"]: idx for idx, obj in enumerate(objects_list)}
@@ -868,6 +910,238 @@ def run_labelme2yolo(project_name: str) -> Response:
 
     except Exception as e:
         logger.error(f"YOLO split error for {project_name}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/list_frame_dirs/<project_name>", methods=["GET"])
+def list_frame_dirs(project_name: str) -> Response:
+    """
+    List all existing frame directories for a project.
+    Returns directories that match pattern: frames_*fps_original
+    """
+    try:
+        project_folder = EXPORTS_PATH / project_name
+        if not project_folder.exists():
+            return make_response({"error": "Project not found"}, 404)
+        
+        # Find all frame directories (e.g., frames_1fps_original, frames_10fps_original)
+        frame_dirs = []
+        for item in project_folder.iterdir():
+            if item.is_dir() and item.name.startswith("frames_") and "original" in item.name:
+                # Check if it has actual images
+                images = list(item.glob("*.jpg")) + list(item.glob("*.png"))
+                if images:
+                    frame_dirs.append(item.name)
+        
+        frame_dirs.sort()
+        
+        return make_response({
+            "success": True,
+            "frame_dirs": frame_dirs,
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"List frame dirs error for {project_name}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/verify_masks/<project_name>", methods=["POST"])
+def verify_masks_endpoint(project_name: str) -> Response:
+    """
+    Verify masks by drawing them on frames.
+    
+    Body JSON: { "frames_dir": str }
+      - frames_dir: subfolder name inside exports/<project_name>/ (e.g. "frames_1fps_original")
+    
+    Creates a new folder: frames_dir + "_verified" with visualized masks
+    """
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFont
+    
+    try:
+        body = request.get_json(force=True) or {}
+        frames_dir_name = body.get("frames_dir", "")
+        
+        if not frames_dir_name:
+            return make_response({"error": "frames_dir is required"}, 400)
+        
+        project_folder = EXPORTS_PATH / project_name
+        if not project_folder.exists():
+            return make_response({"error": "Project not found"}, 404)
+        
+        # Load tracking.json
+        tracking_json_path = project_folder / "tracking.json"
+        if not tracking_json_path.exists():
+            return make_response({"error": "tracking.json not found for this project"}, 404)
+        
+        with open(tracking_json_path, 'r', encoding='utf-8') as f:
+            tracking_data_full = json.load(f)
+        
+        # Get object labels
+        objects_list = tracking_data_full.get("objects", [])
+        label_map = {obj["object_id"]: obj.get("label", f"object_{obj['object_id']}") 
+                    for obj in objects_list}
+        
+        # Build frame_index -> masks mapping
+        tracking_data = {}
+        for frame in tracking_data_full.get("frames", []):
+            frame_idx = frame.get("frame_index")
+            tracking_data[frame_idx] = {
+                "frame_index": frame_idx,
+                "masks": frame.get("masks", [])
+            }
+        
+        # Get frames directory
+        frames_dir = project_folder / frames_dir_name
+        if not frames_dir.exists():
+            return make_response({"error": f"frames_dir '{frames_dir_name}' not found"}, 404)
+        
+        # Create output directory
+        output_dir_name = f"{frames_dir_name}_verified"
+        output_dir = project_folder / output_dir_name
+        
+        # Check if already exists
+        if output_dir.exists():
+            existing_images = list(output_dir.glob("*.jpg"))
+            if existing_images:
+                return make_response({
+                    "success": True,
+                    "output_dir": output_dir_name,
+                    "frame_count": len(existing_images),
+                    "already_exists": True,
+                }, 200)
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Get all image files
+        image_files = sorted(frames_dir.glob("*.jpg")) + sorted(frames_dir.glob("*.png"))
+        if not image_files:
+            return make_response({"error": "No images found in frames directory"}, 400)
+        
+        # Same colors as frontend
+        COLORS = [
+            (56, 128, 243), (240, 170, 25), (0, 210, 190), (40, 210, 50), (135, 115, 255),
+            (0, 200, 240), (250, 135, 25), (230, 25, 59), (250, 125, 200), (160, 255, 80),
+        ]
+        BOX_ALPHA = 60  # Semi-transparent fill
+        LINE_WIDTH = 3  # Border thickness
+        
+        def decode_rle_mask(rle_counts, size):
+            """Decode RLE mask to binary numpy array."""
+            try:
+                from pycocotools import mask as mask_utils
+                if isinstance(rle_counts, str):
+                    rle_dict = {"counts": rle_counts.encode('utf-8'), "size": list(size)}
+                else:
+                    rle_dict = {"counts": rle_counts, "size": list(size)}
+                return mask_utils.decode(rle_dict)
+            except Exception as e:
+                logger.warning(f"Failed to decode RLE mask: {e}")
+                return None
+        
+        def rle_to_bbox(rle_counts, size):
+            """Convert COCO RLE mask to [x, y, w, h] bounding box."""
+            if not rle_counts or not size or len(size) < 2:
+                return []
+            try:
+                from pycocotools.mask import toBbox
+                bbox = toBbox({"counts": rle_counts, "size": list(size)})
+                return [round(float(v), 2) for v in bbox]
+            except Exception as e:
+                logger.warning(f"rle_to_bbox failed: {e}")
+                return []
+        
+        # Process each frame
+        processed_count = 0
+        for i, img_path in enumerate(image_files):
+            try:
+                # Try to extract frame index from filename
+                fname = img_path.stem
+                if "frame_" in fname:
+                    frame_idx = int(fname.split("_")[-1])
+                else:
+                    frame_idx = i
+            except:
+                frame_idx = i
+            
+            # Get masks for this frame
+            frame_data = tracking_data.get(frame_idx)
+            if not frame_data or not frame_data.get("masks"):
+                # No masks, just copy the original
+                import shutil
+                shutil.copy2(str(img_path), str(output_dir / img_path.name))
+                processed_count += 1
+                continue
+            
+            # Load image
+            img = Image.open(img_path).convert("RGB")
+            overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            draw_overlay = ImageDraw.Draw(overlay)
+            draw_img = ImageDraw.Draw(img)
+            
+            # Draw each mask as rectangle box
+            for mask_entry in frame_data["masks"]:
+                obj_id = mask_entry.get("object_id", 0)
+                rle = mask_entry.get("mask", {})
+                if not rle:
+                    continue
+                
+                color = COLORS[obj_id % len(COLORS)]
+                label = label_map.get(obj_id, f"object_{obj_id}")
+                
+                # Get bounding box from RLE
+                bbox = rle_to_bbox(rle.get("counts", ""), rle.get("size", []))
+                if not bbox or len(bbox) < 4:
+                    continue
+                
+                bx, by, bw, bh = bbox
+                x0, y0 = int(bx), int(by)
+                x1, y1 = int(bx + bw), int(by + bh)
+                
+                # Draw semi-transparent filled rectangle
+                draw_overlay.rectangle([x0, y0, x1, y1], fill=(*color, BOX_ALPHA))
+                
+                # Draw solid border (multiple lines for thickness)
+                for t in range(LINE_WIDTH):
+                    draw_img.rectangle(
+                        [x0 + t, y0 + t, x1 - t, y1 - t],
+                        outline=color,
+                    )
+                
+                # Draw label chip at top-left of box
+                font_size = max(14, img.height // 30)
+                try:
+                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                except:
+                    font = ImageFont.load_default()
+                
+                tb = font.getbbox(label) if hasattr(font, 'getbbox') else (0, 0, len(label) * 8, font_size)
+                tw, th = tb[2] - tb[0] + 8, tb[3] - tb[1] + 6
+                lx0, ly0 = x0, max(0, y0 - th)
+                
+                # Label background
+                draw_overlay.rectangle([lx0, ly0, lx0 + tw, ly0 + th], fill=(*color, 220))
+                # Label text
+                draw_overlay.text((lx0 + 4, ly0 + 3), label, fill=(255, 255, 255, 255), font=font)
+            
+            # Composite overlay onto image
+            result = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+            result.save(str(output_dir / img_path.name), "JPEG", quality=95)
+            processed_count += 1
+        
+        logger.info(f"Verified {processed_count} frames → {output_dir}")
+        
+        return make_response({
+            "success": True,
+            "output_dir": output_dir_name,
+            "frame_count": processed_count,
+            "already_exists": False,
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Verify masks error for {project_name}: {e}")
+        import traceback
+        traceback.print_exc()
         return make_response({"error": str(e)}, 500)
 
 
