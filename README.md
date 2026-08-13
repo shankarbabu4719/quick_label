@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/banner.png" width="100%" alt="QuickLabel — powered by pinklotus.ai"/>
+<img src="./assets/banner.png" width="100%" alt="QuickLabel"/>
 
 <br/>
 
