@@ -1972,11 +1972,23 @@ def merge_datasets() -> Response:
         for dp in dataset_paths:
             yolo_dir = Path(dp)
             classes_txt = yolo_dir / "classes.txt"
+            
+            # Load this dataset's class names and build ID mapping
+            dataset_classes = []
             if classes_txt.exists():
                 for cn in classes_txt.read_text().splitlines():
                     cn = cn.strip()
-                    if cn and cn not in all_class_names:
-                        all_class_names.append(cn)
+                    if cn:
+                        dataset_classes.append(cn)
+                        if cn not in all_class_names:
+                            all_class_names.append(cn)
+            
+            # Build remapping: old_class_id -> new_class_id
+            # Example: Video1 red_tote=0 stays 0, Video2 red_tote=1 becomes 0
+            class_id_remap = {}
+            for old_id, class_name in enumerate(dataset_classes):
+                new_id = all_class_names.index(class_name)
+                class_id_remap[old_id] = new_id
 
             for split in ("train", "val"):
                 img_src = yolo_dir / "images" / split
@@ -1986,13 +1998,32 @@ def merge_datasets() -> Response:
                 for img_file in sorted(img_src.glob("*.jpg")):
                     prefix = f"{yolo_dir.parent.parent.name[:8]}_{yolo_dir.parent.name[:12]}"
                     stem   = f"{prefix}_{img_file.stem}"
+                    
+                    # Copy image
                     shutil.copy2(str(img_file), str(merged_dir / "images" / split / f"{stem}.jpg"))
+                    
+                    # Copy and remap label file
                     lbl_file = lbl_src / f"{img_file.stem}.txt"
                     dst_lbl  = merged_dir / "labels" / split / f"{stem}.txt"
+                    
                     if lbl_file.exists():
-                        shutil.copy2(str(lbl_file), str(dst_lbl))
+                        # Read original labels and remap class IDs
+                        remapped_lines = []
+                        for line in lbl_file.read_text().splitlines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            parts = line.split()
+                            if len(parts) >= 5:
+                                old_class_id = int(parts[0])
+                                new_class_id = class_id_remap.get(old_class_id, old_class_id)
+                                # Rebuild line with new class_id
+                                remapped_line = f"{new_class_id} {' '.join(parts[1:])}"
+                                remapped_lines.append(remapped_line)
+                        dst_lbl.write_text("\n".join(remapped_lines) + "\n" if remapped_lines else "")
                     else:
                         dst_lbl.write_text("")
+                    
                     copied[split] += 1
 
         yaml_path = merged_dir / "dataset.yaml"
