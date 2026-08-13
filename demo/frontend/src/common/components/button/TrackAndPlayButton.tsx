@@ -104,8 +104,10 @@ export default function TrackAndPlayButton() {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      // Disabled 'K' key shortcut for track and play
+      // User must click button manually
       const callback = {
-        KeyK: handleTrackAndPlay,
+        // KeyK: handleTrackAndPlay,  // Commented out
       }[event.code];
       if (callback != null) {
         event.preventDefault();
