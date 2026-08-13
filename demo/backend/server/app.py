@@ -676,7 +676,14 @@ def extract_frames(project_name: str) -> Response:
                             # Label chip (top-left corner of mask)
                             font_size = max(14, img.height // 30)
                             try:
-                                font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                                # Try Mac font first, then Ubuntu fonts
+                                try:
+                                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                                except:
+                                    try:
+                                        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+                                    except:
+                                        font = ImageFont.load_default()
                             except Exception:
                                 font = ImageFont.load_default()
 
@@ -1111,7 +1118,14 @@ def verify_masks_endpoint(project_name: str) -> Response:
                 # Draw label chip at top-left of box
                 font_size = max(14, img.height // 30)
                 try:
-                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                    # Try Mac font first, then Ubuntu fonts
+                    try:
+                        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
+                    except:
+                        try:
+                            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
+                        except:
+                            font = ImageFont.load_default()
                 except:
                     font = ImageFont.load_default()
                 

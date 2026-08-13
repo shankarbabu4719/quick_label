@@ -45,13 +45,12 @@ fi
 OS="$(uname -s)"
 if [ "$OS" = "Darwin" ]; then
   # macOS: disable fork safety + MPS fallback
-  # Use MPS (Apple GPU) for better performance — remove FORCE_CPU
   EXTRA_ENV="OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES PYTORCH_ENABLE_MPS_FALLBACK=1 MallocStackLogging=0"
   echo "🍎 macOS detected (MPS GPU mode)"
 else
-  # Linux/Ubuntu: no macOS-specific flags needed
+  # Linux/Ubuntu: CUDA support
   EXTRA_ENV=""
-  echo "🐧 Linux detected"
+  echo "🐧 Linux detected (CUDA/CPU mode)"
 fi
 
 # ── Start backend ────────────────────────────────────────────────
