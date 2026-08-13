@@ -1057,7 +1057,7 @@ def verify_masks_endpoint(project_name: str) -> Response:
                 logger.warning(f"rle_to_bbox failed: {e}")
                 return []
         
-        # Process each frame
+        # Process each frame - ensure ALL extracted frames get mask overlay
         processed_count = 0
         frames_with_masks = 0
         
@@ -1073,12 +1073,32 @@ def verify_masks_endpoint(project_name: str) -> Response:
             # Get masks for this frame from JSON
             frame_data = tracking_data.get(tracking_idx)
             
-            # If no masks in JSON for this frame, just copy plain image
+            # If no masks at exact index, find nearest frame WITH masks
             if not frame_data or not frame_data.get("masks"):
-                import shutil
-                shutil.copy2(str(img_path), str(output_dir / img_path.name))
-                processed_count += 1
-                continue
+                # Search forward and backward for nearest frame with masks
+                found = False
+                for offset in range(1, max_tracking_frame + 1):
+                    # Try forward first
+                    if tracking_idx + offset <= max_tracking_frame:
+                        candidate = tracking_data.get(tracking_idx + offset)
+                        if candidate and candidate.get("masks"):
+                            frame_data = candidate
+                            found = True
+                            break
+                    # Then try backward
+                    if tracking_idx - offset >= 0:
+                        candidate = tracking_data.get(tracking_idx - offset)
+                        if candidate and candidate.get("masks"):
+                            frame_data = candidate
+                            found = True
+                            break
+                
+                # If still no masks found anywhere in JSON, copy plain image
+                if not found or not frame_data or not frame_data.get("masks"):
+                    import shutil
+                    shutil.copy2(str(img_path), str(output_dir / img_path.name))
+                    processed_count += 1
+                    continue
             
             frames_with_masks += 1
             
