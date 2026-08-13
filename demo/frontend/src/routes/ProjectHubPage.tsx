@@ -258,15 +258,7 @@ export default function ProjectHubPage() {
           }} />
 
           <div style={{position:'relative', textAlign:'center', marginBottom:48}}>
-            <div style={{
-              display:'inline-flex', alignItems:'center', gap:8,
-              background:C.indigoLo, border:`1px solid rgba(99,102,241,0.25)`,
-              borderRadius:20, padding:'5px 16px',
-              fontSize:12, fontWeight:600, color:'#a5b4fc',
-              letterSpacing:'0.05em', marginBottom:20,
-            }}>
-              ✦ powered by pinklotus.ai
-            </div>
+
             <h1 style={{
               fontSize:52, fontWeight:800, margin:'0 0 16px',
               letterSpacing:'-1px', lineHeight:1.1,

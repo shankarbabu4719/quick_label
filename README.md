@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/banner.png" width="100%" alt="QuickLabel — powered by pinklotus.ai"/>
+<img src="./assets/banner.png" width="100%" alt="QuickLabel"/>
 
 <br/>
 
@@ -207,9 +207,9 @@ If you use QuickLabel in your research or project, please cite:
 ```bibtex
 @software{quicklabel2024,
   title={QuickLabel: Interactive Video Object Tracking and YOLO Training},
-  author={pinklotus.ai},
+  author={QuickLabel Contributors},
   year={2024},
-  url={https://github.com/yourname/quicklabel}
+  url={https://github.com/shankarbabu4719/quick_label}
 }
 ```
 
