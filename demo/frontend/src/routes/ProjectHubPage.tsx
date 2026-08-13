@@ -735,6 +735,12 @@ function ProjectDetailModal({project, onClose}: {
           if (d.frame_dirs && d.frame_dirs.length > 0) {
             setAvailableFrameDirs(d.frame_dirs);
             setSelectedFrameDir(d.frame_dirs[0]);
+            // Auto-set extract status to success if frames already exist
+            setExtractResult({
+              frameCount: 0, // Unknown, will be shown after re-extract
+              framesDir: d.frame_dirs[0]
+            });
+            setExtractStatus('success');
           }
         }
       } catch (e) {
