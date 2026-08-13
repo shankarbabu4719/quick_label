@@ -1018,6 +1018,12 @@ def verify_masks_endpoint(project_name: str) -> Response:
         if not image_files:
             return make_response({"error": "No images found in frames directory"}, 400)
         
+        # Calculate scaling factor between JSON frames and extracted frames
+        max_tracking_frame = max(tracking_data.keys()) if tracking_data else 0
+        num_extracted_frames = len(image_files)
+        
+        logger.info(f"Max tracking frame index: {max_tracking_frame}, Extracted frames: {num_extracted_frames}")
+        
         # Same colors as frontend
         COLORS = [
             (56, 128, 243), (240, 170, 25), (0, 210, 190), (40, 210, 50), (135, 115, 255),
@@ -1054,18 +1060,17 @@ def verify_masks_endpoint(project_name: str) -> Response:
         # Process each frame
         processed_count = 0
         for i, img_path in enumerate(image_files):
-            try:
-                # Try to extract frame index from filename
-                fname = img_path.stem
-                if "frame_" in fname:
-                    frame_idx = int(fname.split("_")[-1])
-                else:
-                    frame_idx = i
-            except:
-                frame_idx = i
+            # Map extracted frame index to tracking frame index
+            # If we have 900 extracted frames but only 300 tracking frames,
+            # we need to map: extracted_frame_i -> tracking_frame_j
+            if max_tracking_frame > 0:
+                # Scale: tracking_idx = (extracted_idx * max_tracking_frame) / num_extracted_frames
+                tracking_idx = int((i * max_tracking_frame) / max(num_extracted_frames - 1, 1))
+            else:
+                tracking_idx = i
             
             # Get masks for this frame
-            frame_data = tracking_data.get(frame_idx)
+            frame_data = tracking_data.get(tracking_idx)
             if not frame_data or not frame_data.get("masks"):
                 # No masks, just copy the original
                 import shutil
