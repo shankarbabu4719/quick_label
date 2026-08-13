@@ -53,8 +53,10 @@ export default function PlaybackButton() {
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
+      // Disabled 'K' key shortcut for play/pause
+      // User must click button manually
       const callback = {
-        KeyK: handleClick,
+        // KeyK: handleClick,  // Commented out
       }[event.code];
       if (callback != null) {
         event.preventDefault();
@@ -68,7 +70,7 @@ export default function PlaybackButton() {
   }, [handleClick]);
 
   return (
-    <Tooltip message={`${isPlaying ? 'Pause' : 'Play'} (k)`}>
+    <Tooltip message={`${isPlaying ? 'Pause' : 'Play'}`}>
       <button
         disabled={isDisabled}
         className={`group !rounded-full !w-10 !h-10 flex items-center justify-center ${getButtonStyles(isDisabled)}`}
