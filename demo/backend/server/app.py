@@ -1021,8 +1021,11 @@ def verify_masks_endpoint(project_name: str) -> Response:
         # Calculate scaling factor between JSON frames and extracted frames
         max_tracking_frame = max(tracking_data.keys()) if tracking_data else 0
         num_extracted_frames = len(image_files)
+        num_frames_with_masks = len(tracking_data)
         
-        logger.info(f"Max tracking frame index: {max_tracking_frame}, Extracted frames: {num_extracted_frames}")
+        logger.info(f"Tracking: {num_frames_with_masks} frames with masks (max index: {max_tracking_frame})")
+        logger.info(f"Extracted: {num_extracted_frames} frames to verify")
+        logger.info(f"Will repeat nearest masks to cover all extracted frames")
         
         # Same colors as frontend
         COLORS = [
@@ -1124,8 +1127,19 @@ def verify_masks_endpoint(project_name: str) -> Response:
                     continue
                 
                 bx, by, bw, bh = bbox
-                x0, y0 = int(bx), int(by)
-                x1, y1 = int(bx + bw), int(by + bh)
+                
+                # Validate bbox values
+                if bw <= 0 or bh <= 0:
+                    logger.warning(f"Invalid bbox dimensions: w={bw}, h={bh}, skipping")
+                    continue
+                
+                x0, y0 = max(0, int(bx)), max(0, int(by))
+                x1, y1 = min(img.width, int(bx + bw)), min(img.height, int(by + bh))
+                
+                # Final check: ensure x1 > x0 and y1 > y0
+                if x1 <= x0 or y1 <= y0:
+                    logger.warning(f"Invalid bbox coordinates: x0={x0}, x1={x1}, y0={y0}, y1={y1}, skipping")
+                    continue
                 
                 # Draw semi-transparent filled rectangle
                 draw_overlay.rectangle([x0, y0, x1, y1], fill=(*color, BOX_ALPHA))
