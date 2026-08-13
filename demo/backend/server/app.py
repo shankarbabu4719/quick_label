@@ -1063,40 +1063,22 @@ def verify_masks_endpoint(project_name: str) -> Response:
         
         for i, img_path in enumerate(image_files):
             # Map extracted frame index to tracking frame index
-            # If we have 720 extracted frames but only 248 tracking frames with masks,
-            # we need to map: extracted_frame_i -> tracking_frame_j
-            if max_tracking_frame > 0:
-                # Scale: tracking_idx = (extracted_idx * max_tracking_frame) / num_extracted_frames
+            # Simple scaling: tracking_idx = (i * max_tracking_frame) / num_extracted_frames
+            if max_tracking_frame > 0 and num_extracted_frames > 0:
                 tracking_idx = int((i * max_tracking_frame) / max(num_extracted_frames - 1, 1))
-                # Clamp to valid range
                 tracking_idx = min(tracking_idx, max_tracking_frame)
             else:
                 tracking_idx = i
             
-            # Get masks for this frame (use nearest available frame)
+            # Get masks for this frame from JSON
             frame_data = tracking_data.get(tracking_idx)
             
-            # If no data at exact index, try to find nearest frame with masks
+            # If no masks in JSON for this frame, just copy plain image
             if not frame_data or not frame_data.get("masks"):
-                # Find nearest tracking frame with masks
-                found_nearby = False
-                for offset in range(1, 6):  # Try ±5 frames
-                    for nearby_idx in [tracking_idx - offset, tracking_idx + offset]:
-                        if 0 <= nearby_idx <= max_tracking_frame:
-                            nearby_data = tracking_data.get(nearby_idx)
-                            if nearby_data and nearby_data.get("masks"):
-                                frame_data = nearby_data
-                                found_nearby = True
-                                break
-                    if found_nearby:
-                        break
-                
-                # If still no masks found, copy plain image
-                if not frame_data or not frame_data.get("masks"):
-                    import shutil
-                    shutil.copy2(str(img_path), str(output_dir / img_path.name))
-                    processed_count += 1
-                    continue
+                import shutil
+                shutil.copy2(str(img_path), str(output_dir / img_path.name))
+                processed_count += 1
+                continue
             
             frames_with_masks += 1
             
