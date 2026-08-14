@@ -6,6 +6,7 @@
 import contextlib
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 from threading import Lock
@@ -311,6 +312,8 @@ class InferenceAPI:
                     )
 
                 total_frames_tracked = 0
+                auto_save_interval = 20  # Auto-save every 20 frames
+                last_auto_save = 0
 
                 # First doing the forward propagation
                 if propagation_direction in ["both", "forward"]:
@@ -351,6 +354,11 @@ class InferenceAPI:
                             {"object_id": r.object_id, "mask": {"counts": r.mask.counts, "size": r.mask.size}}
                             for r in rle_mask_list
                         ]
+
+                        # Auto-save progress every N frames (forward propagation)
+                        if frame_count % auto_save_interval == 0:
+                            self.__auto_save_session(session_id, session)
+                            logger.info(f"💾 Auto-saved forward progress: {len(session['masks_per_frame'])} frames so far")
 
                         yield PropagateDataResponse(
                             frame_index=frame_idx,
@@ -400,6 +408,11 @@ class InferenceAPI:
                             for r in rle_mask_list
                         ]
 
+                        # Auto-save progress every N frames (backward propagation)
+                        if frame_count % auto_save_interval == 0:
+                            self.__auto_save_session(session_id, session)
+                            logger.info(f"💾 Auto-saved backward progress: {len(session['masks_per_frame'])} frames so far")
+
                         yield PropagateDataResponse(
                             frame_index=frame_idx,
                             results=rle_mask_list,
@@ -410,8 +423,20 @@ class InferenceAPI:
                 
                 logger.info(f"✅ Tracking complete for session {session_id}: {total_frames_tracked} total frames tracked")
                 
+                # Final auto-save at completion
+                self.__auto_save_session(session_id, session)
+                logger.info(f"💾 Final save: {len(session['masks_per_frame'])} frames saved")
+                
             except Exception as e:
                 logger.error(f"❌ Error during propagation in session {session_id}: {e}")
+                
+                # Emergency auto-save on error
+                try:
+                    self.__auto_save_session(session_id, session)
+                    logger.info(f"💾 Emergency save: {len(session.get('masks_per_frame', {}))} frames saved before crash")
+                except:
+                    pass
+                    
                 import traceback
                 traceback.print_exc()
                 raise
@@ -544,3 +569,55 @@ class InferenceAPI:
                     })
             
             return export_data
+
+    def __auto_save_session(self, session_id: str, session: dict) -> None:
+        """
+        Auto-save partial progress to disk during tracking.
+        Creates a temporary export file that can be recovered if process crashes.
+        """
+        try:
+            # Only save if we have some masks
+            if not session.get("masks_per_frame"):
+                return
+            
+            from pathlib import Path
+            import json
+            import os
+            
+            # Create exports folder if not exists
+            from app_conf import EXPORTS_PATH
+            os.makedirs(EXPORTS_PATH, exist_ok=True)
+            
+            # Generate safe filename from video path
+            video_path = session.get("video_path", "")
+            raw_name = os.path.splitext(os.path.basename(video_path))[0]
+            safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_name)[:40] or "autosave"
+            
+            # Auto-save folder with timestamp
+            import time
+            timestamp = int(time.time())
+            autosave_folder = EXPORTS_PATH / f"{safe_name}_autosave_{timestamp}"
+            os.makedirs(autosave_folder, exist_ok=True)
+            
+            # Export current progress
+            export_data = self.export_session(session_id)
+            
+            # Save tracking.json
+            json_path = autosave_folder / "tracking.json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+            
+            # Mark as autosave
+            marker_path = autosave_folder / ".autosave"
+            with open(marker_path, "w") as f:
+                f.write(f"Auto-saved at {timestamp}\n")
+                f.write(f"Total frames tracked: {len(session['masks_per_frame'])}\n")
+                f.write(f"Session ID: {session_id}\n")
+            
+            # Store autosave path in session for cleanup
+            session["last_autosave"] = str(autosave_folder)
+            
+            logger.info(f"📁 Auto-saved {len(session['masks_per_frame'])} frames to {autosave_folder}")
+            
+        except Exception as e:
+            logger.error(f"Failed to auto-save session {session_id}: {e}")

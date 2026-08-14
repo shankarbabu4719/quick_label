@@ -300,6 +300,137 @@ def save_masked_video(session_id: str) -> Response:
         return make_response(f"Error saving masked video: {e}", 500)
 
 
+@app.route("/list_autosaves", methods=["GET"])
+def list_autosaves() -> Response:
+    """
+    List all auto-saved sessions that can be recovered.
+    Returns sessions that were auto-saved but not completed.
+    """
+    try:
+        from pathlib import Path
+        import json
+        
+        autosaves = []
+        if not EXPORTS_PATH.exists():
+            return make_response({"autosaves": []}, 200)
+
+        for folder in EXPORTS_PATH.iterdir():
+            if not folder.is_dir() or "_autosave_" not in folder.name:
+                continue
+            
+            marker_path = folder / ".autosave"
+            json_path = folder / "tracking.json"
+            
+            if not marker_path.exists() or not json_path.exists():
+                continue
+            
+            try:
+                # Read marker info
+                with open(marker_path, "r") as f:
+                    marker_content = f.read()
+                
+                # Read tracking data
+                with open(json_path, "r") as f:
+                    tracking_data = json.load(f)
+                
+                # Parse info from marker
+                lines = marker_content.strip().split('\n')
+                timestamp = folder.name.split('_')[-1]
+                frames_count = len(tracking_data.get("frames", []))
+                
+                autosave_info = {
+                    "folder": folder.name,
+                    "timestamp": int(timestamp),
+                    "frames_count": frames_count,
+                    "video_path": tracking_data.get("video_path", ""),
+                    "objects": tracking_data.get("objects", []),
+                    "created_at": folder.stat().st_mtime,
+                    "size_mb": round(sum(f.stat().st_size for f in folder.rglob('*') if f.is_file()) / 1024 / 1024, 2)
+                }
+                
+                autosaves.append(autosave_info)
+                
+            except Exception as e:
+                logger.warning(f"Failed to parse autosave {folder.name}: {e}")
+                continue
+        
+        # Sort by timestamp (newest first)
+        autosaves.sort(key=lambda x: x["timestamp"], reverse=True)
+        
+        return make_response({"autosaves": autosaves}, 200)
+        
+    except Exception as e:
+        logger.error(f"Error listing autosaves: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/recover_autosave/<folder_name>", methods=["POST"])
+def recover_autosave(folder_name: str) -> Response:
+    """
+    Recover an auto-saved session by converting it to a regular export.
+    Moves the autosave folder to a regular export folder and removes .autosave marker.
+    """
+    try:
+        autosave_folder = EXPORTS_PATH / folder_name
+        
+        if not autosave_folder.exists() or "_autosave_" not in folder_name:
+            return make_response({"error": "Autosave not found"}, 404)
+        
+        # Generate new export folder name (remove _autosave_timestamp)
+        base_name = folder_name.split("_autosave_")[0]
+        new_folder = EXPORTS_PATH / base_name
+        
+        # If target exists, add counter
+        counter = 1
+        while new_folder.exists():
+            new_folder = EXPORTS_PATH / f"{base_name}_{counter}"
+            counter += 1
+        
+        # Move folder
+        import shutil
+        shutil.move(str(autosave_folder), str(new_folder))
+        
+        # Remove .autosave marker
+        marker_path = new_folder / ".autosave"
+        if marker_path.exists():
+            marker_path.unlink()
+        
+        logger.info(f"✅ Recovered autosave {folder_name} → {new_folder.name}")
+        
+        return make_response({
+            "success": True,
+            "new_folder": new_folder.name,
+            "message": f"Autosave recovered as {new_folder.name}"
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Error recovering autosave {folder_name}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/delete_autosave/<folder_name>", methods=["DELETE"])
+def delete_autosave(folder_name: str) -> Response:
+    """
+    Delete an auto-saved session.
+    """
+    try:
+        autosave_folder = EXPORTS_PATH / folder_name
+        
+        if not autosave_folder.exists() or "_autosave_" not in folder_name:
+            return make_response({"error": "Autosave not found"}, 404)
+        
+        import shutil
+        shutil.rmtree(autosave_folder)
+        
+        logger.info(f"🗑️ Deleted autosave {folder_name}")
+        
+        return make_response({"success": True}, 200)
+        
+    except Exception as e:
+        logger.error(f"Error deleting autosave {folder_name}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
 @app.route("/list_exports", methods=["GET"])
 def list_exports() -> Response:
     """
