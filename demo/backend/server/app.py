@@ -157,17 +157,8 @@ def _get_session_export_folder(session_id: str, create_new: bool = False) -> Pat
     raw_name = os.path.splitext(os.path.basename(video_path))[0]
     safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_name)[:40] or "export"
 
-    if create_new:
-        # Find unique folder name
-        export_folder = EXPORTS_PATH / safe_name
-        if export_folder.exists():
-            counter = 2
-            while (EXPORTS_PATH / f"{safe_name}_{counter}").exists():
-                counter += 1
-            export_folder = EXPORTS_PATH / f"{safe_name}_{counter}"
-    else:
-        export_folder = EXPORTS_PATH / safe_name
-
+    # Always use same folder name - overwrite if exists (no _2, _3, etc.)
+    export_folder = EXPORTS_PATH / safe_name
     os.makedirs(export_folder, exist_ok=True)
     # Cache folder in session so save_masked_video uses same folder
     session["export_folder"] = str(export_folder)
@@ -183,28 +174,32 @@ def export_session(session_id: str) -> Response:
         # Optional crop range from query params
         start_frame = request.args.get("start_frame", type=int, default=None)
         end_frame = request.args.get("end_frame", type=int, default=None)
+        # If save=false, just return JSON without writing to disk (used by Download JSON button)
+        should_save = request.args.get("save", "true").lower() != "false"
 
         try:
             export_data = inference_api.export_session(
                 session_id, start_frame=start_frame, end_frame=end_frame
             )
-            export_folder = _get_session_export_folder(session_id, create_new=True)
 
-            # 1. Save tracking JSON
-            json_path = export_folder / "tracking.json"
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(export_data, f, ensure_ascii=False, indent=2)
-            logger.info(f"Saved tracking JSON to {json_path}")
+            if should_save:
+                export_folder = _get_session_export_folder(session_id, create_new=True)
 
-            # 2. Copy original video into the export folder
-            video_path = export_data.get("video_path", "")
-            if video_path and os.path.isfile(video_path):
-                dest = export_folder / "original.mp4"
-                if not dest.exists():
-                    shutil.copy2(video_path, dest)
+                # 1. Save tracking JSON
+                json_path = export_folder / "tracking.json"
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(export_data, f, ensure_ascii=False, indent=2)
+                logger.info(f"Saved tracking JSON to {json_path}")
 
-            # 3. Delete any draft for this session (project is now complete)
-            _delete_draft_for_session(session_id)
+                # 2. Copy original video into the export folder
+                video_path = export_data.get("video_path", "")
+                if video_path and os.path.isfile(video_path):
+                    dest = export_folder / "original.mp4"
+                    if not dest.exists():
+                        shutil.copy2(video_path, dest)
+
+                # 3. Delete any draft for this session (project is now complete)
+                _delete_draft_for_session(session_id)
 
         except RuntimeError:
             # Session expired — try to serve from disk
@@ -298,6 +293,137 @@ def save_masked_video(session_id: str) -> Response:
     except Exception as e:
         logger.error(f"Error saving masked video for session {session_id}: {e}")
         return make_response(f"Error saving masked video: {e}", 500)
+
+
+@app.route("/list_autosaves", methods=["GET"])
+def list_autosaves() -> Response:
+    """
+    List all auto-saved sessions that can be recovered.
+    Returns sessions that were auto-saved but not completed.
+    """
+    try:
+        from pathlib import Path
+        import json
+        
+        autosaves = []
+        if not EXPORTS_PATH.exists():
+            return make_response({"autosaves": []}, 200)
+
+        for folder in EXPORTS_PATH.iterdir():
+            if not folder.is_dir() or "_autosave_" not in folder.name:
+                continue
+            
+            marker_path = folder / ".autosave"
+            json_path = folder / "tracking.json"
+            
+            if not marker_path.exists() or not json_path.exists():
+                continue
+            
+            try:
+                # Read marker info
+                with open(marker_path, "r") as f:
+                    marker_content = f.read()
+                
+                # Read tracking data
+                with open(json_path, "r") as f:
+                    tracking_data = json.load(f)
+                
+                # Parse info from marker
+                lines = marker_content.strip().split('\n')
+                timestamp = folder.name.split('_')[-1]
+                frames_count = len(tracking_data.get("frames", []))
+                
+                autosave_info = {
+                    "folder": folder.name,
+                    "timestamp": int(timestamp),
+                    "frames_count": frames_count,
+                    "video_path": tracking_data.get("video_path", ""),
+                    "objects": tracking_data.get("objects", []),
+                    "created_at": folder.stat().st_mtime,
+                    "size_mb": round(sum(f.stat().st_size for f in folder.rglob('*') if f.is_file()) / 1024 / 1024, 2)
+                }
+                
+                autosaves.append(autosave_info)
+                
+            except Exception as e:
+                logger.warning(f"Failed to parse autosave {folder.name}: {e}")
+                continue
+        
+        # Sort by timestamp (newest first)
+        autosaves.sort(key=lambda x: x["timestamp"], reverse=True)
+        
+        return make_response({"autosaves": autosaves}, 200)
+        
+    except Exception as e:
+        logger.error(f"Error listing autosaves: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/recover_autosave/<folder_name>", methods=["POST"])
+def recover_autosave(folder_name: str) -> Response:
+    """
+    Recover an auto-saved session by converting it to a regular export.
+    Moves the autosave folder to a regular export folder and removes .autosave marker.
+    """
+    try:
+        autosave_folder = EXPORTS_PATH / folder_name
+        
+        if not autosave_folder.exists() or "_autosave_" not in folder_name:
+            return make_response({"error": "Autosave not found"}, 404)
+        
+        # Generate new export folder name (remove _autosave_timestamp)
+        base_name = folder_name.split("_autosave_")[0]
+        new_folder = EXPORTS_PATH / base_name
+        
+        # If target exists, add counter
+        counter = 1
+        while new_folder.exists():
+            new_folder = EXPORTS_PATH / f"{base_name}_{counter}"
+            counter += 1
+        
+        # Move folder
+        import shutil
+        shutil.move(str(autosave_folder), str(new_folder))
+        
+        # Remove .autosave marker
+        marker_path = new_folder / ".autosave"
+        if marker_path.exists():
+            marker_path.unlink()
+        
+        logger.info(f"✅ Recovered autosave {folder_name} → {new_folder.name}")
+        
+        return make_response({
+            "success": True,
+            "new_folder": new_folder.name,
+            "message": f"Autosave recovered as {new_folder.name}"
+        }, 200)
+        
+    except Exception as e:
+        logger.error(f"Error recovering autosave {folder_name}: {e}")
+        return make_response({"error": str(e)}, 500)
+
+
+@app.route("/delete_autosave/<folder_name>", methods=["DELETE"])
+def delete_autosave(folder_name: str) -> Response:
+    """
+    Delete an auto-saved session.
+    """
+    try:
+        autosave_folder = EXPORTS_PATH / folder_name
+        
+        if not autosave_folder.exists() or "_autosave_" not in folder_name:
+            return make_response({"error": "Autosave not found"}, 404)
+        
+        import shutil
+        shutil.rmtree(autosave_folder)
+        
+        logger.info(f"🗑️ Deleted autosave {folder_name}")
+        
+        return make_response({"success": True}, 200)
+        
+    except Exception as e:
+        logger.error(f"Error deleting autosave {folder_name}: {e}")
+        return make_response({"error": str(e)}, 500)
 
 
 @app.route("/list_exports", methods=["GET"])
@@ -571,7 +697,21 @@ def extract_frames(project_name: str) -> Response:
         # Build label lookup: object_id → label
         label_map = {obj["object_id"]: obj.get("label", f"object_{obj['object_id']}") for obj in objects_list}
 
-        # ── Draw full segmentation masks on frames for "masked" source ─────────
+        # Deduplicate class names first
+        unique_class_names = []
+        seen = set()
+        for obj in objects_list:
+            label = label_map.get(obj["object_id"], f"object_{obj['object_id']}")
+            if label not in seen:
+                unique_class_names.append(label)
+                seen.add(label)
+        
+        # Build class index: object_id → unique_class_id (by label, not by object_id)
+        class_id_map = {}
+        for obj in objects_list:
+            label = label_map.get(obj["object_id"], f"object_{obj['object_id']}")
+            class_id = unique_class_names.index(label)
+            class_id_map[obj["object_id"]] = class_id
         if source == "masked" and tracking_data:
             try:
                 from PIL import Image, ImageDraw, ImageFont
@@ -695,9 +835,6 @@ def extract_frames(project_name: str) -> Response:
             except ImportError as ie:
                 logger.warning(f"Required libraries not available for mask visualization: {ie}. Saving plain frames.")
 
-        # Build class index: object_id → class_id (0-based, ordered by objects_list)
-        class_id_map = {obj["object_id"]: idx for idx, obj in enumerate(objects_list)}
-
         for i, frame_file in enumerate(frame_files):
             extracted_sec = i / fps
             track_idx = int(round(extracted_sec * encode_fps))
@@ -776,14 +913,10 @@ def extract_frames(project_name: str) -> Response:
             with open(txt_path, "w", encoding="utf-8") as tf:
                 tf.write("\n".join(yolo_lines))
 
-        # Write classes.txt — YOLO class name list (index = class_id)
+        # Write classes.txt — YOLO class name list (already deduped above)
         classes_path = frames_dir / "classes.txt"
-        class_names = [
-            label_map.get(obj["object_id"], f"object_{obj['object_id']}")
-            for obj in objects_list
-        ]
         with open(classes_path, "w", encoding="utf-8") as cf:
-            cf.write("\n".join(class_names))
+            cf.write("\n".join(unique_class_names))
 
         return make_response({
             "success": True,
@@ -871,13 +1004,27 @@ def run_labelme2yolo(project_name: str) -> Response:
                 # write empty label if no objects in frame
                 (yolo_dir / "labels" / split / f"{stem}.txt").write_text("")
 
-        # ── Copy classes.txt ──────────────────────────────────────────────────
+        # ── Copy classes.txt (deduplicated) ──────────────────────────────────
         src_classes = frames_dir / "classes.txt"
         if src_classes.exists():
-            shutil.copy2(str(src_classes), str(yolo_dir / "classes.txt"))
-            class_names = src_classes.read_text(encoding="utf-8").strip().splitlines()
+            raw_classes = src_classes.read_text(encoding="utf-8").strip().splitlines()
+            # Deduplicate: keep first occurrence of each class name
+            seen_cls = set()
+            class_names = []
+            for c in raw_classes:
+                c = c.strip()
+                if c and c not in seen_cls:
+                    class_names.append(c)
+                    seen_cls.add(c)
         else:
             class_names = []
+
+        # Write deduplicated classes.txt to YOLODataset folder
+        (yolo_dir / "classes.txt").write_text("\n".join(class_names), encoding="utf-8")
+
+        # If source classes.txt had duplicates, fix it in place too
+        if src_classes.exists():
+            src_classes.write_text("\n".join(class_names), encoding="utf-8")
 
         # ── Write dataset.yaml ────────────────────────────────────────────────
         yaml_path = yolo_dir / "dataset.yaml"

@@ -41,33 +41,40 @@ if [ ! -f "$CKPT_DIR/sam2.1_hiera_tiny.pt" ]; then
   (cd "$CKPT_DIR" && bash download_ckpts.sh)
 fi
 
-# ── Detect OS for backend env vars ───────────────────────────────
+# ── Detect OS and configure device ──────────────────────────────
 OS="$(uname -s)"
 if [ "$OS" = "Darwin" ]; then
-  # macOS: disable fork safety + MPS fallback
-  EXTRA_ENV="OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES PYTORCH_ENABLE_MPS_FALLBACK=1 MallocStackLogging=0"
-  echo "🍎 macOS detected (MPS GPU mode)"
+  echo "🍎 macOS detected — MPS (Apple GPU) enabled"
+  export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+  export PYTORCH_ENABLE_MPS_FALLBACK=1
+  # DO NOT set PYTORCH_MPS_HIGH_WATERMARK_RATIO - causes "invalid low watermark ratio" error
+  export MallocStackLogging=0
+  FORCE_CPU=0
+  echo "   Using PyTorch default MPS memory management"
 else
-  # Linux/Ubuntu: CUDA support
-  EXTRA_ENV=""
   echo "🐧 Linux detected (CUDA/CPU mode)"
+  FORCE_CPU=0
 fi
 
 # ── Start backend ────────────────────────────────────────────────
-echo "🔧 Starting backend on http://localhost:7263 (tiny model, CPU mode)..."
+echo "🔧 Starting backend on http://localhost:7263 (SAM2 tiny, MPS)..."
 cd demo/backend/server
 
-env $EXTRA_ENV \
-  APP_ROOT="$PROJECT_ROOT/" \
-  API_URL=http://localhost:7263 \
-  MODEL_SIZE=tiny \
-  DATA_PATH="$PROJECT_ROOT/demo/data" \
-  DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4 \
-  SAM2_MAX_FRAMES=300 \
-  VIDEO_ENCODE_MAX_FRAMES=300 \
-  VIDEO_ENCODE_FPS=10 \
-  FFMPEG_NUM_THREADS=4 \
-  "$PROJECT_ROOT/venv/bin/python" app.py 2>&1 &
+APP_ROOT="$PROJECT_ROOT/"             \
+API_URL="http://localhost:7263"       \
+MODEL_SIZE="tiny"                     \
+DATA_PATH="$PROJECT_ROOT/demo/data"   \
+DEFAULT_VIDEO_PATH="gallery/05_default_juggle.mp4" \
+SAM2_MAX_FRAMES=150                   \
+VIDEO_ENCODE_MAX_FRAMES=150           \
+VIDEO_ENCODE_FPS=6                    \
+VIDEO_ENCODE_MAX_WIDTH=480            \
+VIDEO_ENCODE_MAX_HEIGHT=360           \
+FFMPEG_NUM_THREADS=4                  \
+SAM2_DEMO_FORCE_CPU_DEVICE=$FORCE_CPU \
+PYTORCH_ENABLE_MPS_FALLBACK=1         \
+OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
+"$PROJECT_ROOT/venv/bin/python" app.py 2>&1 &
 
 BACKEND_PID=$!
 cd "$PROJECT_ROOT"

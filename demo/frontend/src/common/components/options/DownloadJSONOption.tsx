@@ -41,7 +41,8 @@ export default function DownloadJSONOption() {
         params.set('end_frame', String(cropRange.endFrame));
       }
       const query = params.toString() ? `?${params.toString()}` : '';
-      const response = await fetch(`http://localhost:7263/export_session/${session.id}${query}`);
+      const separator = query ? '&' : '?';
+      const response = await fetch(`http://localhost:7263/export_session/${session.id}${query}${separator}save=false`);
       if (!response.ok) {
         throw new Error('Failed to export session');
       }
