@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/banner.png" width="100%" alt="QuickLabel — powered by pinklotus.ai"/>
+<img src="./assets/banner.png" width="100%" alt="QuickLabel"/>
 
 <br/>
 
@@ -16,7 +16,7 @@
 <a href="#">
   <img src="https://img.shields.io/badge/%E2%9A%9B%EF%B8%8F-React_18-61dafb?style=flat-square" />
 </a>
-<img src="https://img.shields.io/badge/%F0%9F%8D%8E-macOS-silver?style=flat-square" />
+<img src="https://img.shields.io/badge/%F0%9F%90%A7-Ubuntu%20%2F%20Linux-E95420?style=flat-square" />
 <a href="./LICENSE">
   <img src="https://img.shields.io/badge/%F0%9F%93%84-Apache_2.0-22c55e?style=flat-square" />
 </a>
@@ -42,48 +42,56 @@
 
 ---
 
-## :file_folder: You are on the `mac` branch
+## :file_folder: You are on the `ubuntu` branch
 
 ```
 main
 │
-├── 🍎  mac      ──→  YOU ARE HERE
-├── 🐧  ubuntu   ──→  git checkout ubuntu
+├── 🍎  mac      ──→  git checkout mac
+├── 🐧  ubuntu   ──→  YOU ARE HERE
 └── 🪟  windows  ──→  git checkout windows
 ```
 
-> This branch is configured for **macOS (Apple Silicon & Intel)**. Uses Apple MPS (Metal GPU) automatically — no NVIDIA GPU needed.
+> This branch is configured for **Ubuntu / Linux**. Runs on CPU by default; CUDA GPU is used automatically if NVIDIA drivers are installed.
 
 ---
 
-## :computer: Setup — macOS
+## :computer: Setup — Ubuntu / Linux
 
 ### Prerequisites
 
-| Tool | Install |
+| Tool | Version |
 |------|---------|
-| Homebrew | `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` |
-| Python 3.11 | `brew install python@3.11` |
-| Node.js + Yarn | `brew install node && npm install -g yarn` |
-| ffmpeg | `brew install ffmpeg` |
-| Git | `brew install git` |
+| Python | 3.11+ |
+| Node.js | 20+ |
+| ffmpeg | any |
+| Git | any |
+| Yarn | latest |
 
-### Step 1 — Install dependencies
+### Step 1 — System dependencies
 
 ```bash
-brew install python@3.11 node ffmpeg git
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3-pip ffmpeg git build-essential
+```
+
+### Step 2 — Node.js 20 + Yarn
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
 npm install -g yarn
 ```
 
-### Step 2 — Clone & switch to mac branch
+### Step 3 — Clone & switch to ubuntu branch
 
 ```bash
 git clone git@gitlab.com:superuser.surveillance/sam2_labelme.git
 cd sam2_labelme
-git checkout mac
+git checkout ubuntu
 ```
 
-### Step 3 — Python virtual environment
+### Step 4 — Python virtual environment
 
 ```bash
 python3.11 -m venv venv
@@ -91,22 +99,22 @@ source venv/bin/activate
 pip install -e ".[demo]"
 ```
 
-### Step 4 — Frontend
+### Step 5 — Frontend
 
 ```bash
 cd demo/frontend && yarn install && cd ../..
 ```
 
-### Step 5 — Run
+### Step 6 — Run
 
 ```bash
 chmod +x run-demo.sh
 ./run-demo.sh
 ```
 
-✅ Browser opens automatically → **http://localhost:7262**
+✅ Open browser → **http://localhost:7262**
 
-> **Apple MPS:** The app uses Apple Silicon GPU automatically via Metal. Tracking is fast even without NVIDIA GPU.
+> **CUDA GPU:** PyTorch uses CUDA automatically if NVIDIA drivers are installed. Verify: `python3 -c "import torch; print(torch.cuda.is_available())"`
 
 ---
 
@@ -181,12 +189,13 @@ Set model: `MODEL_SIZE=tiny|small|base_plus|large` in `run-demo.sh`
 
 | Problem | Fix |
 |---------|-----|
-| `python3.11: not found` | `brew install python@3.11` |
-| `ffmpeg: not found` | `brew install ffmpeg` |
-| `node: not found` | `brew install node` |
+| `python3.11: not found` | `sudo apt install python3.11 python3.11-venv` |
+| `ffmpeg: not found` | `sudo apt install ffmpeg` |
+| `node: not found` | Re-run NodeSource setup, restart terminal |
 | Port 7262/7263 in use | `pkill -f "python.*app.py"` |
 | Slow tracking | Switch to Tiny model or shorten crop range |
 | Session fails | Close other apps — 8 GB RAM minimum |
+| CUDA not detected | `sudo apt install nvidia-cuda-toolkit` |
 
 ---
 
