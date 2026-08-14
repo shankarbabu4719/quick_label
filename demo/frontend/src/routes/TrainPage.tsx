@@ -36,6 +36,7 @@ export default function TrainPage() {
   // Step 1 — dataset selection
   // datasets state removed — auto-detected checkboxes removed
   const [manualPaths, setManualPaths] = useState<string[]>(['']);
+  const [dragActive, setDragActive] = useState(false);
 
   // Step 2 — merge
   const [mergeStatus, setMergeStatus] = useState<'idle'|'loading'|'done'|'error'>('idle');
@@ -137,11 +138,43 @@ export default function TrainPage() {
       <div style={{maxWidth:860,margin:'0 auto',padding:'40px 32px 80px'}}>
 
         {/* ── STEP 1: data= ── */}
-        <StepCard step={1} title="data=" subtitle="Select dataset.yaml files — click to browse or use auto-detected" done={mergeStatus==='done'}>
+        <StepCard step={1} title="data=" subtitle="Select dataset.yaml files — drag & drop multiple folders or paste paths" done={mergeStatus==='done'}>
 
-          {/* ── Folder picker button ── */}
+          {/* ── Drag & Drop + Click to Browse ── */}
           <div style={{marginBottom:16}}>
-            <label style={{display:'block',cursor:'pointer'}}>
+            <label 
+              style={{display:'block',cursor:'pointer'}}
+              onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+              onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+              onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+              onDrop={e => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragActive(false);
+                
+                const items = Array.from(e.dataTransfer.items);
+                const newPaths: string[] = [];
+                
+                // Handle drag & drop folders
+                items.forEach(item => {
+                  const entry = (item as any).webkitGetAsEntry?.();
+                  if (entry?.isDirectory) {
+                    // For directories, construct the path with dataset.yaml
+                    const fullPath = (entry as any).fullPath || entry.name;
+                    newPaths.push(fullPath + (fullPath.endsWith('/') ? '' : '/') + 'dataset.yaml');
+                  }
+                });
+
+                // If paths were extracted, add them
+                if (newPaths.length > 0) {
+                  setManualPaths(prev => {
+                    const existing = prev.filter(p => p.trim());
+                    const merged = [...existing, ...newPaths.filter(p => !existing.includes(p))];
+                    return merged.length > 0 ? merged : [''];
+                  });
+                }
+              }}
+            >
               <input
                 type="file"
                 // @ts-ignore — webkitdirectory is non-standard but works in Chrome/Firefox/Electron
@@ -171,23 +204,58 @@ export default function TrainPage() {
               />
               <div style={{
                 padding:'22px', borderRadius:12, textAlign:'center',
-                border:`2px dashed ${manualPaths.some(p=>p.trim())?'rgba(99,102,241,0.5)':C.border}`,
-                background:manualPaths.some(p=>p.trim())?C.indigoLo:C.surface,
+                border:`2px dashed ${dragActive ? 'rgba(34,197,94,0.6)' : manualPaths.some(p=>p.trim())?'rgba(99,102,241,0.5)':C.border}`,
+                background: dragActive ? 'rgba(34,197,94,0.15)' : manualPaths.some(p=>p.trim())?C.indigoLo:C.surface,
                 transition:'all 0.15s',
               }}>
-                <div style={{fontSize:30,marginBottom:8}}>📁</div>
-                <div style={{fontSize:14,fontWeight:700,color:'#a5b4fc',marginBottom:4}}>
-                  {manualPaths.filter(p=>p.trim()).length > 0
-                    ? '+ Add another YOLODataset folder'
-                    : 'Click to select YOLODataset folder(s)'}
+                <div style={{fontSize:30,marginBottom:8}}>{dragActive ? '📥' : '📁'}</div>
+                <div style={{fontSize:14,fontWeight:700,color: dragActive ? C.green : '#a5b4fc',marginBottom:4}}>
+                  {dragActive 
+                    ? 'Drop folders here...'
+                    : manualPaths.filter(p=>p.trim()).length > 0
+                      ? '+ Add more YOLODataset folders'
+                      : 'Click to browse or drag & drop multiple folders'}
                 </div>
                 <div style={{fontSize:12,color:C.textDim}}>
-                  {manualPaths.filter(p=>p.trim()).length > 0
-                    ? `${manualPaths.filter(p=>p.trim()).length} folder(s) selected — click again to add more`
-                    : 'Select one or more YOLODataset folders — dataset.yaml will be detected automatically'}
+                  {dragActive
+                    ? 'Release to add all folders'
+                    : manualPaths.filter(p=>p.trim()).length > 0
+                      ? `${manualPaths.filter(p=>p.trim()).length} folder(s) selected — drag more or click to add`
+                      : 'Drag multiple YOLODataset folders here at once, or click to browse'}
                 </div>
               </div>
             </label>
+          </div>
+
+          {/* Manual path input - paste multiple paths */}
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.textDim,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:8}}>
+              Or paste dataset.yaml paths (one per line)
+            </div>
+            <textarea
+              placeholder="/path/to/folder1/dataset.yaml&#10;/path/to/folder2/dataset.yaml&#10;/path/to/folder3/dataset.yaml"
+              rows={4}
+              style={{
+                width:'100%', padding:'10px 14px',
+                background:C.surfaceHi,
+                border:`1px solid ${C.border}`,
+                borderRadius:8, color:C.text,
+                fontSize:11, fontFamily:'monospace',
+                outline:'none', boxSizing:'border-box',
+                resize:'vertical',
+              }}
+              onChange={e => {
+                const lines = e.target.value.split('\n').map(l => l.trim()).filter(l => l);
+                if (lines.length > 0) {
+                  setManualPaths(prev => {
+                    const existing = prev.filter(p => p.trim());
+                    const merged = [...existing, ...lines.filter(p => !existing.includes(p))];
+                    return merged.length > 0 ? merged : [''];
+                  });
+                  e.target.value = ''; // clear after adding
+                }
+              }}
+            />
           </div>
 
           {/* Selected folders/yaml list */}
