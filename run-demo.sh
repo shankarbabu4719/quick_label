@@ -55,7 +55,7 @@ else
 fi
 
 # ── Start backend ────────────────────────────────────────────────
-echo "🔧 Starting backend on http://localhost:7263 (tiny model, CPU mode)..."
+echo "🔧 Starting backend on http://localhost:7263 (tiny model, optimized for speed)..."
 cd demo/backend/server
 
 env $EXTRA_ENV \
@@ -64,9 +64,11 @@ env $EXTRA_ENV \
   MODEL_SIZE=tiny \
   DATA_PATH="$PROJECT_ROOT/demo/data" \
   DEFAULT_VIDEO_PATH=gallery/05_default_juggle.mp4 \
-  SAM2_MAX_FRAMES=300 \
-  VIDEO_ENCODE_MAX_FRAMES=300 \
-  VIDEO_ENCODE_FPS=10 \
+  SAM2_MAX_FRAMES=200 \
+  VIDEO_ENCODE_MAX_FRAMES=200 \
+  VIDEO_ENCODE_FPS=8 \
+  VIDEO_ENCODE_MAX_WIDTH=480 \
+  VIDEO_ENCODE_MAX_HEIGHT=320 \
   FFMPEG_NUM_THREADS=4 \
   "$PROJECT_ROOT/venv/bin/python" app.py 2>&1 &
 
