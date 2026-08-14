@@ -157,17 +157,8 @@ def _get_session_export_folder(session_id: str, create_new: bool = False) -> Pat
     raw_name = os.path.splitext(os.path.basename(video_path))[0]
     safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw_name)[:40] or "export"
 
-    if create_new:
-        # Find unique folder name
-        export_folder = EXPORTS_PATH / safe_name
-        if export_folder.exists():
-            counter = 2
-            while (EXPORTS_PATH / f"{safe_name}_{counter}").exists():
-                counter += 1
-            export_folder = EXPORTS_PATH / f"{safe_name}_{counter}"
-    else:
-        export_folder = EXPORTS_PATH / safe_name
-
+    # Always use same folder name - overwrite if exists (no _2, _3, etc.)
+    export_folder = EXPORTS_PATH / safe_name
     os.makedirs(export_folder, exist_ok=True)
     # Cache folder in session so save_masked_video uses same folder
     session["export_folder"] = str(export_folder)
@@ -183,28 +174,32 @@ def export_session(session_id: str) -> Response:
         # Optional crop range from query params
         start_frame = request.args.get("start_frame", type=int, default=None)
         end_frame = request.args.get("end_frame", type=int, default=None)
+        # If save=false, just return JSON without writing to disk (used by Download JSON button)
+        should_save = request.args.get("save", "true").lower() != "false"
 
         try:
             export_data = inference_api.export_session(
                 session_id, start_frame=start_frame, end_frame=end_frame
             )
-            export_folder = _get_session_export_folder(session_id, create_new=True)
 
-            # 1. Save tracking JSON
-            json_path = export_folder / "tracking.json"
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(export_data, f, ensure_ascii=False, indent=2)
-            logger.info(f"Saved tracking JSON to {json_path}")
+            if should_save:
+                export_folder = _get_session_export_folder(session_id, create_new=True)
 
-            # 2. Copy original video into the export folder
-            video_path = export_data.get("video_path", "")
-            if video_path and os.path.isfile(video_path):
-                dest = export_folder / "original.mp4"
-                if not dest.exists():
-                    shutil.copy2(video_path, dest)
+                # 1. Save tracking JSON
+                json_path = export_folder / "tracking.json"
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(export_data, f, ensure_ascii=False, indent=2)
+                logger.info(f"Saved tracking JSON to {json_path}")
 
-            # 3. Delete any draft for this session (project is now complete)
-            _delete_draft_for_session(session_id)
+                # 2. Copy original video into the export folder
+                video_path = export_data.get("video_path", "")
+                if video_path and os.path.isfile(video_path):
+                    dest = export_folder / "original.mp4"
+                    if not dest.exists():
+                        shutil.copy2(video_path, dest)
+
+                # 3. Delete any draft for this session (project is now complete)
+                _delete_draft_for_session(session_id)
 
         except RuntimeError:
             # Session expired — try to serve from disk
@@ -702,7 +697,21 @@ def extract_frames(project_name: str) -> Response:
         # Build label lookup: object_id → label
         label_map = {obj["object_id"]: obj.get("label", f"object_{obj['object_id']}") for obj in objects_list}
 
-        # ── Draw full segmentation masks on frames for "masked" source ─────────
+        # Deduplicate class names first
+        unique_class_names = []
+        seen = set()
+        for obj in objects_list:
+            label = label_map.get(obj["object_id"], f"object_{obj['object_id']}")
+            if label not in seen:
+                unique_class_names.append(label)
+                seen.add(label)
+        
+        # Build class index: object_id → unique_class_id (by label, not by object_id)
+        class_id_map = {}
+        for obj in objects_list:
+            label = label_map.get(obj["object_id"], f"object_{obj['object_id']}")
+            class_id = unique_class_names.index(label)
+            class_id_map[obj["object_id"]] = class_id
         if source == "masked" and tracking_data:
             try:
                 from PIL import Image, ImageDraw, ImageFont
@@ -826,9 +835,6 @@ def extract_frames(project_name: str) -> Response:
             except ImportError as ie:
                 logger.warning(f"Required libraries not available for mask visualization: {ie}. Saving plain frames.")
 
-        # Build class index: object_id → class_id (0-based, ordered by objects_list)
-        class_id_map = {obj["object_id"]: idx for idx, obj in enumerate(objects_list)}
-
         for i, frame_file in enumerate(frame_files):
             extracted_sec = i / fps
             track_idx = int(round(extracted_sec * encode_fps))
@@ -907,14 +913,10 @@ def extract_frames(project_name: str) -> Response:
             with open(txt_path, "w", encoding="utf-8") as tf:
                 tf.write("\n".join(yolo_lines))
 
-        # Write classes.txt — YOLO class name list (index = class_id)
+        # Write classes.txt — YOLO class name list (already deduped above)
         classes_path = frames_dir / "classes.txt"
-        class_names = [
-            label_map.get(obj["object_id"], f"object_{obj['object_id']}")
-            for obj in objects_list
-        ]
         with open(classes_path, "w", encoding="utf-8") as cf:
-            cf.write("\n".join(class_names))
+            cf.write("\n".join(unique_class_names))
 
         return make_response({
             "success": True,
@@ -1002,13 +1004,27 @@ def run_labelme2yolo(project_name: str) -> Response:
                 # write empty label if no objects in frame
                 (yolo_dir / "labels" / split / f"{stem}.txt").write_text("")
 
-        # ── Copy classes.txt ──────────────────────────────────────────────────
+        # ── Copy classes.txt (deduplicated) ──────────────────────────────────
         src_classes = frames_dir / "classes.txt"
         if src_classes.exists():
-            shutil.copy2(str(src_classes), str(yolo_dir / "classes.txt"))
-            class_names = src_classes.read_text(encoding="utf-8").strip().splitlines()
+            raw_classes = src_classes.read_text(encoding="utf-8").strip().splitlines()
+            # Deduplicate: keep first occurrence of each class name
+            seen_cls = set()
+            class_names = []
+            for c in raw_classes:
+                c = c.strip()
+                if c and c not in seen_cls:
+                    class_names.append(c)
+                    seen_cls.add(c)
         else:
             class_names = []
+
+        # Write deduplicated classes.txt to YOLODataset folder
+        (yolo_dir / "classes.txt").write_text("\n".join(class_names), encoding="utf-8")
+
+        # If source classes.txt had duplicates, fix it in place too
+        if src_classes.exists():
+            src_classes.write_text("\n".join(class_names), encoding="utf-8")
 
         # ── Write dataset.yaml ────────────────────────────────────────────────
         yaml_path = yolo_dir / "dataset.yaml"
