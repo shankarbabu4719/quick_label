@@ -38,3 +38,7 @@ _C.*
 outputs/*
 checkpoints/*.pt
 demo/backend/checkpoints/*.pt
+
+# YOLO model files (too large for GitHub)
+yolov8x.pt
+demo/data/exports/yolov8x.pt
