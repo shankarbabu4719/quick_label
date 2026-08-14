@@ -310,8 +310,12 @@ class InferenceAPI:
                         f"invalid propagation direction: {propagation_direction}"
                     )
 
+                total_frames_tracked = 0
+
                 # First doing the forward propagation
                 if propagation_direction in ["both", "forward"]:
+                    frame_count = 0
+                    logger.info(f"Starting forward propagation from frame {start_frame_idx}")
                     for outputs in self.predictor.propagate_in_video(
                         inference_state=inference_state,
                         start_frame_idx=start_frame_idx,
@@ -319,12 +323,19 @@ class InferenceAPI:
                         reverse=False,
                     ):
                         if session["canceled"]:
+                            logger.info(f"Tracking canceled by user at frame {frame_idx}")
                             return None
 
                         frame_idx, obj_ids, video_res_masks = outputs
+                        frame_count += 1
+
+                        # Log progress every 10 frames
+                        if frame_count % 10 == 0:
+                            logger.info(f"Forward: processed {frame_count} frames (current: {frame_idx})")
 
                         # Stop at end_frame_idx if crop range is set
                         if end_frame_idx is not None and frame_idx > end_frame_idx:
+                            logger.info(f"Reached end frame {end_frame_idx}, stopping forward propagation")
                             break
 
                         masks_binary = (
@@ -345,9 +356,14 @@ class InferenceAPI:
                             frame_index=frame_idx,
                             results=rle_mask_list,
                         )
+                    
+                    logger.info(f"Forward propagation complete: {frame_count} frames processed")
+                    total_frames_tracked += frame_count
 
                 # Then doing the backward propagation (reverse in time)
                 if propagation_direction in ["both", "backward"]:
+                    frame_count = 0
+                    logger.info(f"Starting backward propagation from frame {start_frame_idx}")
                     for outputs in self.predictor.propagate_in_video(
                         inference_state=inference_state,
                         start_frame_idx=start_frame_idx,
@@ -355,11 +371,19 @@ class InferenceAPI:
                         reverse=True,
                     ):
                         if session["canceled"]:
+                            logger.info(f"Tracking canceled by user at frame {frame_idx}")
                             return None
 
                         frame_idx, obj_ids, video_res_masks = outputs
+                        frame_count += 1
+                        
+                        # Log progress every 10 frames
+                        if frame_count % 10 == 0:
+                            logger.info(f"Backward: processed {frame_count} frames (current: {frame_idx})")
+                        
                         # Stop backward propagation at crop start_frame_idx
                         if frame_idx < start_frame_idx:
+                            logger.info(f"Reached start frame {start_frame_idx}, stopping backward propagation")
                             break
 
                         masks_binary = (
@@ -380,6 +404,17 @@ class InferenceAPI:
                             frame_index=frame_idx,
                             results=rle_mask_list,
                         )
+                    
+                    logger.info(f"Backward propagation complete: {frame_count} frames processed")
+                    total_frames_tracked += frame_count
+                
+                logger.info(f"✅ Tracking complete for session {session_id}: {total_frames_tracked} total frames tracked")
+                
+            except Exception as e:
+                logger.error(f"❌ Error during propagation in session {session_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
             finally:
                 # Log upon completion (so that e.g. we can see if two propagations happen in parallel).
                 # Using `finally` here to log even when the tracking is aborted with GeneratorExit.
