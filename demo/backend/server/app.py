@@ -676,14 +676,7 @@ def extract_frames(project_name: str) -> Response:
                             # Label chip (top-left corner of mask)
                             font_size = max(14, img.height // 30)
                             try:
-                                # Try Mac font first, then Ubuntu fonts
-                                try:
-                                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
-                                except:
-                                    try:
-                                        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
-                                    except:
-                                        font = ImageFont.load_default()
+                                font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
                             except Exception:
                                 font = ImageFont.load_default()
 
@@ -1028,8 +1021,11 @@ def verify_masks_endpoint(project_name: str) -> Response:
         # Calculate scaling factor between JSON frames and extracted frames
         max_tracking_frame = max(tracking_data.keys()) if tracking_data else 0
         num_extracted_frames = len(image_files)
+        num_frames_with_masks = len(tracking_data)
         
-        logger.info(f"Max tracking frame index: {max_tracking_frame}, Extracted frames: {num_extracted_frames}")
+        logger.info(f"Tracking: {num_frames_with_masks} frames with masks (max index: {max_tracking_frame})")
+        logger.info(f"Extracted: {num_extracted_frames} frames to verify")
+        logger.info(f"Will repeat nearest masks to cover all extracted frames")
         
         # Same colors as frontend
         COLORS = [
@@ -1064,42 +1060,44 @@ def verify_masks_endpoint(project_name: str) -> Response:
                 logger.warning(f"rle_to_bbox failed: {e}")
                 return []
         
-        # Process each frame
+        # Process each frame - ensure ALL extracted frames get mask overlay
         processed_count = 0
         frames_with_masks = 0
         
         for i, img_path in enumerate(image_files):
             # Map extracted frame index to tracking frame index
-            # If we have 720 extracted frames but only 248 tracking frames with masks,
-            # we need to map: extracted_frame_i -> tracking_frame_j
-            if max_tracking_frame > 0:
-                # Scale: tracking_idx = (extracted_idx * max_tracking_frame) / num_extracted_frames
+            # Simple scaling: tracking_idx = (i * max_tracking_frame) / num_extracted_frames
+            if max_tracking_frame > 0 and num_extracted_frames > 0:
                 tracking_idx = int((i * max_tracking_frame) / max(num_extracted_frames - 1, 1))
-                # Clamp to valid range
                 tracking_idx = min(tracking_idx, max_tracking_frame)
             else:
                 tracking_idx = i
             
-            # Get masks for this frame (use nearest available frame)
+            # Get masks for this frame from JSON
             frame_data = tracking_data.get(tracking_idx)
             
-            # If no data at exact index, try to find nearest frame with masks
+            # If no masks at exact index, find nearest frame WITH masks
             if not frame_data or not frame_data.get("masks"):
-                # Find nearest tracking frame with masks
-                found_nearby = False
-                for offset in range(1, 6):  # Try ±5 frames
-                    for nearby_idx in [tracking_idx - offset, tracking_idx + offset]:
-                        if 0 <= nearby_idx <= max_tracking_frame:
-                            nearby_data = tracking_data.get(nearby_idx)
-                            if nearby_data and nearby_data.get("masks"):
-                                frame_data = nearby_data
-                                found_nearby = True
-                                break
-                    if found_nearby:
-                        break
+                # Search forward and backward for nearest frame with masks
+                found = False
+                for offset in range(1, max_tracking_frame + 1):
+                    # Try forward first
+                    if tracking_idx + offset <= max_tracking_frame:
+                        candidate = tracking_data.get(tracking_idx + offset)
+                        if candidate and candidate.get("masks"):
+                            frame_data = candidate
+                            found = True
+                            break
+                    # Then try backward
+                    if tracking_idx - offset >= 0:
+                        candidate = tracking_data.get(tracking_idx - offset)
+                        if candidate and candidate.get("masks"):
+                            frame_data = candidate
+                            found = True
+                            break
                 
-                # If still no masks found, copy plain image
-                if not frame_data or not frame_data.get("masks"):
+                # If still no masks found anywhere in JSON, copy plain image
+                if not found or not frame_data or not frame_data.get("masks"):
                     import shutil
                     shutil.copy2(str(img_path), str(output_dir / img_path.name))
                     processed_count += 1
@@ -1129,8 +1127,19 @@ def verify_masks_endpoint(project_name: str) -> Response:
                     continue
                 
                 bx, by, bw, bh = bbox
-                x0, y0 = int(bx), int(by)
-                x1, y1 = int(bx + bw), int(by + bh)
+                
+                # Validate bbox values
+                if bw <= 0 or bh <= 0:
+                    logger.warning(f"Invalid bbox dimensions: w={bw}, h={bh}, skipping")
+                    continue
+                
+                x0, y0 = max(0, int(bx)), max(0, int(by))
+                x1, y1 = min(img.width, int(bx + bw)), min(img.height, int(by + bh))
+                
+                # Final check: ensure x1 > x0 and y1 > y0
+                if x1 <= x0 or y1 <= y0:
+                    logger.warning(f"Invalid bbox coordinates: x0={x0}, x1={x1}, y0={y0}, y1={y1}, skipping")
+                    continue
                 
                 # Draw semi-transparent filled rectangle
                 draw_overlay.rectangle([x0, y0, x1, y1], fill=(*color, BOX_ALPHA))
@@ -1145,14 +1154,7 @@ def verify_masks_endpoint(project_name: str) -> Response:
                 # Draw label chip at top-left of box
                 font_size = max(14, img.height // 30)
                 try:
-                    # Try Mac font first, then Ubuntu fonts
-                    try:
-                        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
-                    except:
-                        try:
-                            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size)
-                        except:
-                            font = ImageFont.load_default()
+                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", font_size)
                 except:
                     font = ImageFont.load_default()
                 
@@ -1984,11 +1986,23 @@ def merge_datasets() -> Response:
         for dp in dataset_paths:
             yolo_dir = Path(dp)
             classes_txt = yolo_dir / "classes.txt"
+            
+            # Load this dataset's class names and build ID mapping
+            dataset_classes = []
             if classes_txt.exists():
                 for cn in classes_txt.read_text().splitlines():
                     cn = cn.strip()
-                    if cn and cn not in all_class_names:
-                        all_class_names.append(cn)
+                    if cn:
+                        dataset_classes.append(cn)
+                        if cn not in all_class_names:
+                            all_class_names.append(cn)
+            
+            # Build remapping: old_class_id -> new_class_id
+            # Example: Video1 red_tote=0 stays 0, Video2 red_tote=1 becomes 0
+            class_id_remap = {}
+            for old_id, class_name in enumerate(dataset_classes):
+                new_id = all_class_names.index(class_name)
+                class_id_remap[old_id] = new_id
 
             for split in ("train", "val"):
                 img_src = yolo_dir / "images" / split
@@ -1998,13 +2012,32 @@ def merge_datasets() -> Response:
                 for img_file in sorted(img_src.glob("*.jpg")):
                     prefix = f"{yolo_dir.parent.parent.name[:8]}_{yolo_dir.parent.name[:12]}"
                     stem   = f"{prefix}_{img_file.stem}"
+                    
+                    # Copy image
                     shutil.copy2(str(img_file), str(merged_dir / "images" / split / f"{stem}.jpg"))
+                    
+                    # Copy and remap label file
                     lbl_file = lbl_src / f"{img_file.stem}.txt"
                     dst_lbl  = merged_dir / "labels" / split / f"{stem}.txt"
+                    
                     if lbl_file.exists():
-                        shutil.copy2(str(lbl_file), str(dst_lbl))
+                        # Read original labels and remap class IDs
+                        remapped_lines = []
+                        for line in lbl_file.read_text().splitlines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            parts = line.split()
+                            if len(parts) >= 5:
+                                old_class_id = int(parts[0])
+                                new_class_id = class_id_remap.get(old_class_id, old_class_id)
+                                # Rebuild line with new class_id
+                                remapped_line = f"{new_class_id} {' '.join(parts[1:])}"
+                                remapped_lines.append(remapped_line)
+                        dst_lbl.write_text("\n".join(remapped_lines) + "\n" if remapped_lines else "")
                     else:
                         dst_lbl.write_text("")
+                    
                     copied[split] += 1
 
         yaml_path = merged_dir / "dataset.yaml"
