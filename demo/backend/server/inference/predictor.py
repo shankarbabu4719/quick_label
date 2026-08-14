@@ -306,7 +306,7 @@ class InferenceAPI:
                 inference_state = session["state"]
 
                 total_frames_tracked = 0
-                auto_save_interval = 20  # save every 20 frames
+                # auto_save_interval = 20  # save every 20 frames (DISABLED)
 
                 # ── Forward propagation ───────────────────────────
                 if propagation_direction in ["both", "forward"]:
@@ -342,11 +342,15 @@ class InferenceAPI:
                             for r in rle_mask_list
                         ]
 
-                        # Auto-save + memory cleanup every N frames
-                        if frame_count % auto_save_interval == 0:
-                            self.__auto_save_session_no_lock(session_id, session)
+                        # Auto-save DISABLED by user request
+                        # if frame_count % auto_save_interval == 0:
+                        #     self.__auto_save_session_no_lock(session_id, session)
+                        #     self._clear_device_cache()
+                        #     logger.info(f"  💾 Auto-saved {len(session['masks_per_frame'])} frames")
+                        
+                        # Keep memory cleanup every 20 frames
+                        if frame_count % 20 == 0:
                             self._clear_device_cache()
-                            logger.info(f"  💾 Auto-saved {len(session['masks_per_frame'])} frames")
 
                         yield PropagateDataResponse(
                             frame_index=frame_idx,
@@ -390,11 +394,15 @@ class InferenceAPI:
                             for r in rle_mask_list
                         ]
 
-                        # Auto-save + memory cleanup every N frames
-                        if frame_count % auto_save_interval == 0:
-                            self.__auto_save_session_no_lock(session_id, session)
+                        # Auto-save DISABLED by user request
+                        # if frame_count % auto_save_interval == 0:
+                        #     self.__auto_save_session_no_lock(session_id, session)
+                        #     self._clear_device_cache()
+                        #     logger.info(f"  💾 Auto-saved {len(session['masks_per_frame'])} frames")
+                        
+                        # Keep memory cleanup every 20 frames
+                        if frame_count % 20 == 0:
                             self._clear_device_cache()
-                            logger.info(f"  💾 Auto-saved {len(session['masks_per_frame'])} frames")
 
                         yield PropagateDataResponse(
                             frame_index=frame_idx,
@@ -406,19 +414,19 @@ class InferenceAPI:
 
                 logger.info(f"✅ Tracking complete: {total_frames_tracked} total frames")
 
-                # Final save on success
-                self.__auto_save_session_no_lock(session_id, session)
-                logger.info(f"💾 Final save: {len(session['masks_per_frame'])} frames")
+                # Final save DISABLED - user doesn't want auto-save folders
+                # self.__auto_save_session_no_lock(session_id, session)
+                # logger.info(f"💾 Final save: {len(session['masks_per_frame'])} frames")
 
             except Exception as e:
                 logger.error(f"❌ Propagation error in session {session_id}: {e}")
                 traceback.print_exc()
-                # Emergency save
-                try:
-                    self.__auto_save_session_no_lock(session_id, session)
-                    logger.info(f"💾 Emergency save: {len(session.get('masks_per_frame', {}))} frames saved")
-                except Exception as save_err:
-                    logger.error(f"Emergency save failed: {save_err}")
+                # Emergency save DISABLED - user doesn't want auto-save folders
+                # try:
+                #     self.__auto_save_session_no_lock(session_id, session)
+                #     logger.info(f"💾 Emergency save: {len(session.get('masks_per_frame', {}))} frames saved")
+                # except Exception as save_err:
+                #     logger.error(f"Emergency save failed: {save_err}")
                 raise
             finally:
                 logger.info(f"propagation ended in session {session_id}")
