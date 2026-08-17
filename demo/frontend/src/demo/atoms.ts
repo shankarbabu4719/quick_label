@@ -85,7 +85,7 @@ export type TrackletObject = {
   isInitialized: boolean;
 };
 
-const MAX_NUMBER_TRACKLET_OBJECTS = 10;
+const MAX_NUMBER_TRACKLET_OBJECTS = 100; // Increased from 10 to allow more objects
 
 export const activeTrackletObjectIdAtom = atom<number | null>(0);
 

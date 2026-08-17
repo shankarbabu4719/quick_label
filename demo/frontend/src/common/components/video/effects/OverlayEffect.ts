@@ -56,8 +56,8 @@ export default class OverlayEffect extends BaseGLEffect {
     this._numMasksUniformLocation = gl.getUniformLocation(program, 'uNumMasks');
     gl.uniform1i(this._numMasksUniformLocation, this._numMasks);
 
-    // Pre-allocate textures for up to 10 objects
-    this._maskTextures = preAllocateTextures(gl, 10);
+    // Pre-allocate textures for up to 100 objects (increased from 10)
+    this._maskTextures = preAllocateTextures(gl, 100);
   }
 
   apply(form: CanvasForm, context: EffectFrameContext, _tracklets: Tracklet[]) {
